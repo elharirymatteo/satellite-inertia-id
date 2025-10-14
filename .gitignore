@@ -1,0 +1,15 @@
+# Python
+__pycache__/
+
+# Venv i_id_sim
+i_id_sim-venv/
+
+# Jupyter Notebook
+.ipynb_checkpoints/
+*.ipynb
+
+# images
+*.png
+*.jpg
+
+*.csv

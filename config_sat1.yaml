@@ -1,0 +1,24 @@
+# Satellite 1
+satellite:
+  mass: 24.0
+  dimensions: [0.2, 0.2, 0.3]  # meters
+  # Diagonal inertia tensor as function of mass and dimensions
+  inertia_tensor: [0.26, 0.26, 0.16]
+
+reaction_wheels:
+  enabled: true
+  max_torque: 0.01  # Nm (reasonable)
+  diameter: 0.06    # meters (6 cm)
+  max_speed: 460   # (rad/s)
+  inertia: 0.0001  # kg*m^2 (small inertia for RW)
+
+  alignment_matrix:  # RW axes (1 per axis here)
+    - [1, 0, 0]
+    - [0, 1, 0]
+    - [0, 0, 1]
+
+sim:
+  dt: 1.0 # 0.5 seconds
+  t_max: 300.0 # seconds
+  initial_omega: [0.0, 0.0, 0.0]
+  initial_rw_speed: [0.0, 0.0, 0.0]

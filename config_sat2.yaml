@@ -1,0 +1,28 @@
+# Satellite 2
+satellite:
+  mass: 95.0  # kg, typical for a microsatellite
+  dimensions: [0.5, 0.6, 0.8]  # meters (width x depth x height)
+
+  # Diagonal inertia tensor calculated from I = (1/12) * m * (y² + z²), etc.
+  # Ixx = 1/12 * 80 * (0.6² + 0.8²) ≈ 6.53
+  # Iyy = 1/12 * 80 * (0.5² + 0.8²) ≈ 5.96
+  # Izz = 1/12 * 80 * (0.5² + 0.6²) ≈ 4.53
+  inertia_tensor: [6.53, 5.96, 4.53]
+
+reaction_wheels:
+  enabled: true
+  max_torque: 0.1        # Nm — larger RWs for microsats
+  diameter: 0.12          # meters
+  max_speed: 900         # rad/s
+  inertia: 0.002         # kg·m² — realistic for a ~12cm rotor
+
+  alignment_matrix:
+    - [1, 0, 0]
+    - [0, 1, 0]
+    - [0, 0, 1]
+
+sim:
+  dt: 1.0                 # 0.5 s time step for finer resolution
+  t_max: 300.0            # simulate for 10 minutes
+  initial_omega: [0.0, 0.0, 0.0]
+  initial_rw_speed: [0.0, 0.0, 0.0]

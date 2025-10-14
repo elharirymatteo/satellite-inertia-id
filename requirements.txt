@@ -1,0 +1,11 @@
+numpy
+scipy
+matplotlib
+pyyaml
+pytest
+scikit-learn
+mujoco  # For future MuJoCo integration
+gymnasium  # For RL environment
+stable-baselines3  # For RL algorithms
+torch  # For neural networks and RL
+tensorboard  # For training visualization

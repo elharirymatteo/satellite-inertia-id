@@ -9,6 +9,7 @@ including basic least squares, robust methods, and regularized approaches.
 import numpy as np
 from scipy.optimize import least_squares
 import warnings
+from utils.math_utils import skew
 
 
 class InertiaModel:
@@ -206,7 +207,7 @@ class LeastSquaresEstimator:
         h_total = I_tensor @ omega + h_rw_total
         
         # Modified Euler's equation with external torques (matches SatelliteWithExternalTorques)
-        omega_cross = self._skew(omega)
+        omega_cross = skew(omega)
         try:
             domega = np.linalg.solve(I_tensor, tau_ext - omega_cross @ h_total - h_rw_dot)
         except np.linalg.LinAlgError:
@@ -238,7 +239,7 @@ class LeastSquaresEstimator:
         h_total = I_tensor @ omega + h_rw_total
         
         # Euler's equation with RW coupling (no external torques)
-        omega_cross = self._skew(omega)
+        omega_cross = skew(omega)
         try:
             domega = np.linalg.solve(I_tensor, -omega_cross @ h_total - h_rw_dot)
         except np.linalg.LinAlgError:
@@ -269,14 +270,6 @@ class LeastSquaresEstimator:
             domega = np.zeros(3)
         
         return domega
-    
-    def _skew(self, v):
-        """Return the skew-symmetric matrix for cross product"""
-        return np.array([
-            [0, -v[2], v[1]],
-            [v[2], 0, -v[0]],
-            [-v[1], v[0], 0]
-        ])
     
     def set_satellite_model(self, satellite_model):
         """Set the satellite model to use for dynamics computation"""

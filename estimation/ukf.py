@@ -1,5 +1,6 @@
 import numpy as np
 from scipy.linalg import cholesky
+from utils.math_utils import skew
 
 class UKFInertiaEstimator:
     """Enhanced UKF with RW states for inertia identification"""
@@ -110,11 +111,7 @@ class UKFInertiaEstimator:
         
         h_total = I_mat @ omega + h_rw_total
         
-        omega_cross = np.array([
-            [0, -omega[2], omega[1]],
-            [omega[2], 0, -omega[0]],
-            [-omega[1], omega[0], 0]
-        ])
+        omega_cross = skew(omega)
         
         try:
             domega = np.linalg.solve(I_mat, -omega_cross @ h_total - h_rw_dot)

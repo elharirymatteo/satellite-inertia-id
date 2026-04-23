@@ -1,14 +1,7 @@
 import numpy as np
 from scipy.integrate import solve_ivp
 import warnings
-
-def skew(v):
-    """Return the skew-symmetric matrix for cross product: ω × v = skew(ω) · v"""
-    return np.array([
-        [0, -v[2], v[1]],
-        [v[2], 0, -v[0]],
-        [-v[1], v[0], 0]
-    ])
+from utils.math_utils import skew
 
 class Satellite:
     def __init__(self, I_sat, I_rw, rw_axes, rw_speed_max=None, rw_torque_max=None, 

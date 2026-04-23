@@ -9,6 +9,7 @@
 from __future__ import annotations
 import numpy as np
 from dataclasses import dataclass
+from utils.math_utils import skew
 
 @dataclass
 class EKFConfig:
@@ -48,13 +49,6 @@ class EKFInertiaRW:
 
         # Small floors to keep physical parameters in range
         self._I_floor = 1e-6
-
-    @staticmethod
-    def _skew(v: np.ndarray) -> np.ndarray:
-        x, y, z = v
-        return np.array([[0, -z,  y],
-                         [z,  0, -x],
-                         [-y, x,  0]], dtype=np.float64)
 
     def f(self, x: np.ndarray, u: np.ndarray, tau_ext: np.ndarray | None = None) -> np.ndarray:
         """ Continuous-time dynamics xdot = f(x,u) """

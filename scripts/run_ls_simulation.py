@@ -69,7 +69,8 @@ def run_enhanced_simulation(config_file="config_sat1.yaml", ls_model=DiagonalIne
                             use_external_torques=False, use_ekf=False, use_ls=True,
                           use_realistic_actuators=False, use_noisy_sensors=True,
                           torque_profile="multi_sine", torque_params=None,
-                          seed=42, verbose=True, horizon=False, dynamic_I_func_name=None):
+                          seed=42, verbose=True, horizon=False, dynamic_I_func_name=None,
+                          show_plots=True):
     """
     Run enhanced simulation with all features
     
@@ -180,7 +181,7 @@ def run_enhanced_simulation(config_file="config_sat1.yaml", ls_model=DiagonalIne
     
     # Control function now just interpolates precomputed data
     def enhanced_control_input(time_val):
-        idx = np.argmin(np.abs(t - time_val))
+        idx = int(np.clip(np.searchsorted(t, time_val, side='left'), 0, len(t) - 1))
         return torque_data_full[idx]
 
     ########################################################################
@@ -407,7 +408,7 @@ def run_enhanced_simulation(config_file="config_sat1.yaml", ls_model=DiagonalIne
         config_info=config_info,
         ext_torques=None,
         save_plots=False,
-        show_plots=True,
+        show_plots=show_plots,
         verbose=False,
         torque_profile=torque_profile,
         satellite=sat_name,
@@ -472,7 +473,6 @@ def main_seeds():
             satellite = 3
         else:
             raise ValueError("Invalid satellite number. Must be 1, 2, or 3.")
-        satellite = 3
 
         for i in range(1, 4):  # Loop over dynamic inertia functions
 

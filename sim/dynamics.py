@@ -200,43 +200,34 @@ class Satellite:
         
         return states_clamped, clamping_applied
 
-    def compute_angular_accelerations(self, t_eval, states, control_func):
-        """Compute angular accelerations at specific time points after simulation"""
+    def compute_angular_accelerations(self, t_eval, states, control_func=None):
+        """Compute angular accelerations using stored tau_actual history.
+
+        Uses self.tau_actual_history (populated by simulate) rather than re-calling
+        control_func, which avoids corrupting torque-smoothing state.
+        control_func is kept for API compatibility but is not used.
+        """
         self.angular_accelerations = []
-        
-        for i, t_val in enumerate(t_eval):
-            state = states[i]
-            omega = state[:3]
-            rw_speeds = state[3:6]
-            
-            # Compute commanded torque
-            tau_commanded = control_func(t_val)
-            tau_commanded = self._smooth_torque_command(tau_commanded, t_val)
-            rw_acc_unlimited = tau_commanded / self.I_rw
-            
-            # Apply limits
-            rw_acc, tau_actual, _ = self._apply_rw_limits(
-                rw_speeds, rw_acc_unlimited, tau_commanded
-            )
-            
-            # RW momentum calculations
+        tau_actual_at_eval = self.get_tau_actual_at_times(t_eval)
+
+        for i in range(len(t_eval)):
+            omega = states[i, :3]
+            rw_speeds = states[i, 3:6]
+            tau_actual = tau_actual_at_eval[i]
+            rw_acc = tau_actual / self.I_rw
+
             h_rw_total = np.zeros(3)
             for j in range(3):
                 h_rw_total += self.rw_axes[j] * (self.I_rw * rw_speeds[j])
-            
+
             h_rw_dot = np.zeros(3)
             for j in range(3):
                 h_rw_dot += self.rw_axes[j] * (self.I_rw * rw_acc[j])
-            
-            # Total angular momentum
+
             h_total = self.I_sat @ omega + h_rw_total
-            
-            # Compute angular acceleration
-            omega_cross = skew(omega)
-            domega = np.linalg.inv(self.I_sat) @ (-omega_cross @ h_total - h_rw_dot)
-            
+            domega = np.linalg.inv(self.I_sat) @ (-skew(omega) @ h_total - h_rw_dot)
             self.angular_accelerations.append(domega)
-        
+
         self.angular_accelerations = np.array(self.angular_accelerations)
 
     def simulate(self, omega0, rw_speed0, control_func, t_span, dt):

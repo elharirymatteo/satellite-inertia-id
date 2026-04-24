@@ -208,13 +208,12 @@ class Satellite:
         control_func is kept for API compatibility but is not used.
         """
         self.angular_accelerations = []
-        tau_actual_at_eval = self.get_tau_actual_at_times(t_eval)
+        rw_acc_at_eval = self.get_rw_acc_at_times(t_eval)
 
         for i in range(len(t_eval)):
             omega = states[i, :3]
             rw_speeds = states[i, 3:6]
-            tau_actual = tau_actual_at_eval[i]
-            rw_acc = tau_actual / self.I_rw
+            rw_acc = rw_acc_at_eval[i]
 
             h_rw_total = np.zeros(3)
             for j in range(3):
@@ -237,7 +236,8 @@ class Satellite:
         self.tau_actual_history = []
         self.tau_commanded_history = []
         self.time_history = []
-        
+        self.rw_acc_history = []
+
         # Reset torque smoothing state
         self.prev_tau = np.zeros(3)
         self.prev_time = t_span[0]
@@ -449,6 +449,7 @@ class SatelliteWithExternalTorques(Satellite):
         self.tau_actual_history = []
         self.tau_commanded_history = []
         self.time_history = []
+        self.rw_acc_history = []
         self.prev_tau = np.zeros(3)
         self.prev_time = t_span[0]
         
@@ -493,6 +494,7 @@ class SatelliteWithExternalTorques(Satellite):
         self.tau_actual_history = np.array(self.tau_actual_history)
         self.tau_commanded_history = np.array(self.tau_commanded_history)
         self.time_history = np.array(self.time_history)
+        self.rw_acc_history = np.array(self.rw_acc_history)
 
         # Compute external torques at output points after integration
         self.tau_ext = []

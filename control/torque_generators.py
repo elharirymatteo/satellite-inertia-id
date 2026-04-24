@@ -166,49 +166,47 @@ def sine_3axis_profile(t: np.ndarray, axes: List[str],
     return torques
 
 def prbs_torque(t: np.ndarray, axes: List[str],
-                amplitude: Union[float, List[float]] = 0.005, 
-                switch_time: Union[float, List[float]] = 5.0, 
-                seed: int = 42,
+                amplitude: Union[float, List[float]] = 0.005,
+                switch_time: Union[float, List[float]] = 5.0,
+                seed: int = 1,
                 **kwargs) -> np.ndarray:
-    """
-    Generate Pseudo-Random Binary Sequence (PRBS) torque profiles
-    
-    PRBS is optimal for system identification as it provides uniform frequency content
-    
+    """Generate Pseudo-Random Binary Sequence (PRBS) torque profiles using LFSR.
+
+    Uses a maximal-length Linear Feedback Shift Register so the sequence has
+    period 2^n - 1 and near-ideal flat autocorrelation.
+
     Args:
         t: Time vector
         axes: Axes to generate for
-        amplitude: Amplitude(s) in Nm
-        switch_time: Time between switches in seconds
-        seed: Random seed for reproducibility
-        
+        amplitude: Amplitude(s) in Nm [scalar or list of 3]
+        switch_time: Clock period between sequence bits in seconds
+        seed: LFSR initial state (non-zero; each axis uses seed+axis_index)
+
     Returns:
         Torque array [N, 3]
     """
     n_axes = 3
     torques = np.zeros((len(t), n_axes))
-    
+
     amp_list = _ensure_list(amplitude, n_axes)
     switch_list = _ensure_list(switch_time, n_axes)
-    
-    np.random.seed(seed)
-    
+
+    dt = float(t[1] - t[0]) if len(t) > 1 else 1.0
+
     for i in range(n_axes):
-        # Generate switch times
-        n_switches = int(t[-1] / switch_list[i])
-        switch_times = np.linspace(0, t[-1], n_switches + 1)
-        
-        # Generate random binary sequence
-        binary_seq = np.random.choice([-1, 1], size=n_switches)
-        
-        # Create PRBS signal
-        prbs_signal = np.zeros_like(t)
-        for j in range(n_switches):
-            mask = (t >= switch_times[j]) & (t < switch_times[j + 1])
-            prbs_signal[mask] = binary_seq[j]
-        
-        torques[:, i] = amp_list[i] * prbs_signal
-    
+        clock_samples = max(1, round(switch_list[i] / dt))
+        n_switches = int(np.ceil(len(t) / clock_samples)) + 2
+
+        n_bits = max(4, min(12, int(np.ceil(np.log2(n_switches + 1)))))
+        seq = _lfsr_sequence(n_bits=n_bits, n_samples=n_switches, seed=seed + i)
+
+        for j, val in enumerate(seq):
+            start = j * clock_samples
+            end = min((j + 1) * clock_samples, len(t))
+            if start >= len(t):
+                break
+            torques[start:end, i] = amp_list[i] * val
+
     return torques
 
 def one_step_torque(t: np.ndarray, axes: List[str],
@@ -448,12 +446,53 @@ def _generate_colored_noise(n_samples: int, amplitude: float, alpha: float = 1.0
     """Generate colored noise using AR(1) process"""
     white_noise = np.random.normal(0, 1, n_samples)
     colored_noise = np.zeros_like(white_noise)
-    
+
     for i in range(1, n_samples):
         colored_noise[i] = alpha * colored_noise[i-1] + white_noise[i]
-    
+
     # Scale to desired amplitude
     return amplitude * colored_noise / np.std(colored_noise)
+
+
+def _lfsr_sequence(n_bits: int, n_samples: int, seed: int = 1) -> np.ndarray:
+    """Maximal-length LFSR sequence of ±1 values.
+
+    Uses well-known primitive polynomials to guarantee period = 2^n_bits - 1.
+    Sequences from different seeds differ by their starting register state.
+
+    Args:
+        n_bits: LFSR width (4–12). Clamped to nearest available.
+        n_samples: Number of output samples (can exceed one full period).
+        seed: Initial register state (non-zero; 0 is forced to 1).
+
+    Returns:
+        Array of ±1.0 values, shape (n_samples,).
+    """
+    _PRIMS = {
+        4:  0b10011,
+        5:  0b100101,
+        6:  0b1000011,
+        7:  0b10000011,
+        8:  0b100011101,
+        10: 0b10000001001,
+        12: 0b100000101001,
+    }
+    valid = sorted(_PRIMS.keys())
+    n_bits = min(valid, key=lambda x: abs(x - n_bits))
+    poly = _PRIMS[n_bits]
+    mask = (1 << n_bits) - 1
+
+    state = int(seed) & mask
+    if state == 0:
+        state = 1
+
+    output = np.empty(n_samples, dtype=np.float64)
+    for k in range(n_samples):
+        output[k] = 1.0 if (state & 1) else -1.0
+        feedback = bin(state & poly).count('1') % 2
+        state = ((state >> 1) | (feedback << (n_bits - 1))) & mask
+
+    return output
 
 
 # Registry of available torque generators

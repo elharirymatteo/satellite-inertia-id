@@ -10,7 +10,7 @@ class TestLFSRSequence:
 
     def test_period_is_2n_minus_1(self):
         """An n-bit LFSR has period 2^n - 1."""
-        for n_bits in (4, 5, 6, 8, 10, 12):
+        for n_bits in (4, 5, 6, 8, 9, 10, 11, 12):
             period = 2 ** n_bits - 1
             seq = _lfsr_sequence(n_bits=n_bits, n_samples=2 * period, seed=1)
             np.testing.assert_array_equal(seq[:period], seq[period:2 * period],
@@ -41,9 +41,7 @@ class TestPRBSTorque:
         torques = generate_torque_profile('prbs', t, amplitude=0.01, switch_time=20)
         amplitude = 0.01
         for val in torques.flatten():
-            assert abs(abs(val) - amplitude) < 1e-10 or abs(val) < 1e-10, (
-                f"PRBS value {val} is not ±{amplitude} or 0"
-            )
+            assert abs(abs(val) - amplitude) < 1e-10, f"PRBS value {val} is not ±{amplitude}"
 
     def test_output_shape(self):
         t = np.linspace(0, 100, 100)
@@ -55,3 +53,10 @@ class TestPRBSTorque:
         t1 = generate_torque_profile('prbs', t, amplitude=0.01, seed=1)
         t2 = generate_torque_profile('prbs', t, amplitude=0.01, seed=7)
         assert not np.array_equal(t1, t2)
+
+    def test_axes_use_different_seeds(self):
+        """Each axis should use a different LFSR seed, producing different sequences."""
+        t = np.linspace(0, 300, 300)
+        torques = generate_torque_profile('prbs', t, amplitude=0.01, switch_time=20, seed=1)
+        assert not np.array_equal(torques[:, 0], torques[:, 1])
+        assert not np.array_equal(torques[:, 1], torques[:, 2])

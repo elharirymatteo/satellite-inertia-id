@@ -474,7 +474,9 @@ def _lfsr_sequence(n_bits: int, n_samples: int, seed: int = 1) -> np.ndarray:
         6:  0b1000011,
         7:  0b10000011,
         8:  0b100011101,
+        9:  0b1000010001,    # x^9+x^4+1, period=511
         10: 0b10000001001,
+        11: 0b100000000101,  # x^11+x^2+1, period=2047
         12: 0b1000010011001,  # x^12+x^7+x^4+x^3+1, period=4095
     }
     valid = sorted(_PRIMS.keys())

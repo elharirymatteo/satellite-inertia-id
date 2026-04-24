@@ -10,10 +10,11 @@ class TestLFSRSequence:
 
     def test_period_is_2n_minus_1(self):
         """An n-bit LFSR has period 2^n - 1."""
-        for n_bits in (4, 5, 6):
+        for n_bits in (4, 5, 6, 8, 10, 12):
             period = 2 ** n_bits - 1
             seq = _lfsr_sequence(n_bits=n_bits, n_samples=2 * period, seed=1)
-            np.testing.assert_array_equal(seq[:period], seq[period:2 * period])
+            np.testing.assert_array_equal(seq[:period], seq[period:2 * period],
+                                          err_msg=f"Period wrong for n_bits={n_bits}")
 
     def test_different_seeds_give_different_sequences(self):
         s1 = _lfsr_sequence(n_bits=6, n_samples=63, seed=1)

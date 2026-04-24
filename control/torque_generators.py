@@ -475,7 +475,7 @@ def _lfsr_sequence(n_bits: int, n_samples: int, seed: int = 1) -> np.ndarray:
         7:  0b10000011,
         8:  0b100011101,
         10: 0b10000001001,
-        12: 0b100000101001,
+        12: 0b1000010011001,  # x^12+x^7+x^4+x^3+1, period=4095
     }
     valid = sorted(_PRIMS.keys())
     n_bits = min(valid, key=lambda x: abs(x - n_bits))

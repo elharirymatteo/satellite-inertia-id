@@ -276,6 +276,9 @@ class Satellite:
         self.time_history = np.array(self.time_history)
         self.rw_acc_history = np.array(self.rw_acc_history)
 
+        # Zero external torques — subclass SatelliteWithExternalTorques overrides this
+        self.tau_ext = np.zeros((len(sol.t), 3))
+
         # Compute angular accelerations at evaluation points
         self.compute_angular_accelerations(sol.t, states_clamped, control_func)
 
@@ -538,15 +541,15 @@ class SatelliteWithExternalTorques(Satellite):
 
 
 
-import yaml
-from control.torque_generators import generate_torque_profile
-# Import configuration settings
-def load_config(config_file="config.yaml"):
-    """Load configuration from file"""
-    with open(config_file, "r") as f:
-        return yaml.safe_load(f)
-
 if __name__ == "__main__":
+    import yaml
+    from control.torque_generators import generate_torque_profile
+
+    def load_config(config_file="config.yaml"):
+        """Load configuration from file"""
+        with open(config_file, "r") as f:
+            return yaml.safe_load(f)
+
     cfg = load_config()
 
         # Parameters

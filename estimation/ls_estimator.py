@@ -311,7 +311,7 @@ class LeastSquaresEstimator:
                 initial_guess,
                 args=(dynamics_data,),
                 bounds=bounds_tuple,
-                loss=self.robust_loss,
+                loss=self.robust_loss if self.robust_loss is not None else 'linear',
                 max_nfev=1000,
                 ftol=1e-9,
                 xtol=1e-9

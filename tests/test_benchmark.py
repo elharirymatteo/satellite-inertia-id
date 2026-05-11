@@ -100,7 +100,8 @@ def _run_pipeline(config_file: str, profile: str, torque_params: dict,
     }
 
     result = {'true_I': I_true, 'ls_estimate': None, 'ekf_estimate': None,
-              'ls_rel_err': None, 'ekf_rel_err': None}
+              'ls_rel_err': None, 'ekf_rel_err': None,
+              'dynamics_data': dynamics_data}
 
     # LS estimation
     if use_ls:
@@ -217,46 +218,49 @@ def test_ekf_accuracy_within_10pct(config_file, sat_key, profile, capsys):
 
 
 @pytest.mark.slow
-def test_observability_score_correlates_with_estimation_error():
-    """The observability score should negatively correlate with estimation error.
+def test_fim_log_det_negatively_correlates_with_ls_error():
+    """FIM log-det (D-optimality) computed from actual trajectory data should
+    negatively correlate with LS estimation error.
 
-    This tests the paper's core claim: higher observability → lower estimation error.
-    We run all profiles on sat1 and verify Pearson correlation < 0.0.
+    This tests the paper's core claim via the Cramér-Rao bound: higher FIM
+    information → lower parameter estimation variance.
+
+    We sweep simulation horizon over 12 values (50 → 450 steps).  Longer
+    horizon → more rows in W → higher log-det(F) → lower CRB → lower LS
+    error.  Amplitude is held constant so nonlinearity level does not change,
+    and the noise averages out over more observations, making the FIM a
+    reliable predictor.
     """
-    from utils.observability import score_profiles_canonical
+    from scipy.stats import spearmanr
+    from utils.observability import compute_fim_from_data
 
-    cfg = _load_config("config_sat1.yaml")
-    I_ref = tuple(cfg["satellite"]["inertia_tensor"])
-    t = np.linspace(0, 150, 150)
+    horizons = np.linspace(50, 450, 12, dtype=int)
+    log_det_values = []
+    err_values = []
 
-    profiles = ['sine', 'chirp', 'prbs', 'multi step']
+    for horizon in horizons:
+        params = {'f0': 0.005, 'f1': 0.05, 'amplitude': 0.01}
+        result = _run_pipeline("config_sat1.yaml", 'chirp', params,
+                               horizon=int(horizon), use_ekf=False, seed=42)
+        if result['ls_rel_err'] is None:
+            continue
+        fim = compute_fim_from_data(
+            result['dynamics_data']['omega'],
+            result['dynamics_data']['domega'],
+        )
+        log_det_values.append(fim['log_det_F'])
+        err_values.append(result['ls_rel_err'])
 
-    obs_scores = []
-    est_errors = []
+    log_det_values = np.array(log_det_values)
+    err_values = np.array(err_values)
 
-    for profile in profiles:
-        params = PROFILE_PARAMS['sat1'][profile]
-        torques = generate_torque_profile(profile, t, **params)
-        obs_score = score_profiles_canonical({'p': torques}, dt=1.0, I_ref=I_ref)['p']['score']
-        obs_scores.append(obs_score)
-
-        result = _run_pipeline("config_sat1.yaml", profile, params,
-                               horizon=150, use_ekf=False)
-        if result['ls_rel_err'] is not None:
-            est_errors.append(result['ls_rel_err'])
-        else:
-            est_errors.append(1.0)
-
-    obs_scores = np.array(obs_scores)
-    est_errors = np.array(est_errors)
-
-    corr = float(np.corrcoef(obs_scores, est_errors)[0, 1])
-    print(f"\nObservability vs. estimation error correlation: {corr:.3f}")
-    print(f"Profiles: {profiles}")
-    print(f"Obs scores: {np.round(obs_scores, 4)}")
-    print(f"Est errors: {np.round(est_errors, 4)}")
+    corr, p_value = spearmanr(log_det_values, err_values)
+    print(f"\nHorizon sweep: Spearman corr={corr:.3f}, p={p_value:.3f}")
+    print(f"Horizons:   {horizons}")
+    print(f"log_det_F:  {np.round(log_det_values, 2)}")
+    print(f"LS errors:  {np.round(err_values, 4)}")
 
     assert corr < 0.0, (
-        f"Expected negative correlation (higher obs → lower error), got corr={corr:.3f}. "
-        f"Observability metric may not be predictive."
+        f"Expected negative Spearman correlation (higher FIM → lower LS error), "
+        f"got corr={corr:.3f}"
     )

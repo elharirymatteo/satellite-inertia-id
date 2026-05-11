@@ -106,6 +106,60 @@ def compute_observability_metric(torques, dt, I_ref, normalize_energy=True):
     }
 
 
+def compute_fim_from_data(omega, domega):
+    """
+    Compute the Fisher Information Matrix for diagonal inertia estimation
+    from actual observed angular velocity and acceleration data.
+
+    Builds the regressor W from Euler's equations linearised in (Ixx, Iyy, Izz):
+        tau_x ≈ Ixx*dω_x − Iyy*ω_y*ω_z + Izz*ω_y*ω_z   → row = [dω_x, −ω_y*ω_z,  ω_y*ω_z]
+        tau_y ≈ Ixx*ω_z*ω_x + Iyy*dω_y  − Izz*ω_z*ω_x   → row = [ ω_z*ω_x,  dω_y, −ω_z*ω_x]
+        tau_z ≈ −Ixx*ω_x*ω_y + Iyy*ω_x*ω_y + Izz*dω_z   → row = [−ω_x*ω_y, ω_x*ω_y,  dω_z]
+
+    F = W^T W is the Fisher Information Matrix; its eigenvalues set the
+    Cramér-Rao lower bound on estimation variance.
+
+    Parameters
+    ----------
+    omega  : ndarray, shape (N, 3) — observed angular velocity [rad/s]
+    domega : ndarray, shape (N, 3) — observed angular acceleration [rad/s²]
+
+    Returns
+    -------
+    dict with keys:
+        W              : ndarray (3N, 3) — regressor matrix
+        F              : ndarray (3, 3)  — Fisher information matrix W^T W
+        log_det_F      : float           — log-determinant of F (D-optimality)
+        min_sv         : float           — smallest singular value of W
+        condition_number : float         — max_sv / (min_sv + 1e-300)
+    """
+    wx, wy, wz = omega[:, 0], omega[:, 1], omega[:, 2]
+    dw_x, dw_y, dw_z = domega[:, 0], domega[:, 1], domega[:, 2]
+
+    row_x = np.column_stack([ dw_x,    -wy * wz,  wy * wz])
+    row_y = np.column_stack([ wz * wx,  dw_y,    -wz * wx])
+    row_z = np.column_stack([-wx * wy,  wx * wy,  dw_z])
+
+    N = omega.shape[0]
+    W = np.empty((3 * N, 3))
+    W[0::3] = row_x
+    W[1::3] = row_y
+    W[2::3] = row_z
+
+    F = W.T @ W
+    sv = np.linalg.svd(W, compute_uv=False)
+    min_sv = float(sv[-1])
+    max_sv = float(sv[0])
+
+    return {
+        'W': W,
+        'F': F,
+        'log_det_F': float(2.0 * np.sum(np.log(sv + 1e-300))),
+        'min_sv': min_sv,
+        'condition_number': max_sv / (min_sv + 1e-300),
+    }
+
+
 def score_profiles_canonical(torques_dict, dt, I_ref, normalize_energy=True):
     """
     Score multiple torque profiles and rank them by observability.

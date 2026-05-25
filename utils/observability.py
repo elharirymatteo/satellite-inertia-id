@@ -6,6 +6,24 @@ for the purpose of inertia parameter estimation.
 """
 
 import numpy as np
+import jax.numpy as jnp
+
+
+def regression_rows_full(omega: jnp.ndarray, omega_dot: jnp.ndarray) -> jnp.ndarray:
+    """Return the 3x6 row matrix R such that R @ theta = tau, where
+    theta = (Ixx, Iyy, Izz, Ixy, Ixz, Iyz) and Euler's equation is
+    tau = I @ omega_dot + omega x (I @ omega).
+    """
+    wx, wy, wz = omega[0], omega[1], omega[2]
+    dwx, dwy, dwz = omega_dot[0], omega_dot[1], omega_dot[2]
+    return jnp.array([
+        [dwx,        -wy * wz,    wy * wz,
+         dwy - wx * wz,  dwz + wx * wy,  wy * wy - wz * wz],
+        [wx * wz,    dwy,        -wx * wz,
+         dwx + wy * wz,  wz * wz - wx * wx,  dwz - wx * wy],
+        [-wx * wy,   wx * wy,     dwz,
+         wx * wx - wy * wy,  dwx - wy * wz,  dwy + wx * wz],
+    ])
 
 
 def compute_observability_metric(torques, dt, I_ref, normalize_energy=True):

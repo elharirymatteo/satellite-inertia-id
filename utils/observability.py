@@ -129,6 +129,9 @@ def compute_fim_from_data(omega, domega):
     Compute the Fisher Information Matrix for diagonal inertia estimation
     from actual observed angular velocity and acceleration data.
 
+    Returns the diagonal-model FIM (3-parameter); for the full 6-parameter
+    regressor, see `regression_rows_full` above.
+
     Builds the regressor W from Euler's equations linearised in (Ixx, Iyy, Izz):
         tau_x ≈ Ixx*dω_x − Iyy*ω_y*ω_z + Izz*ω_y*ω_z   → row = [dω_x, −ω_y*ω_z,  ω_y*ω_z]
         tau_y ≈ Ixx*ω_z*ω_x + Iyy*dω_y  − Izz*ω_z*ω_x   → row = [ ω_z*ω_x,  dω_y, −ω_z*ω_x]

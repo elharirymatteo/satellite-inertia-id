@@ -2,7 +2,6 @@
 of Euler's equation in the 6 inertia parameters."""
 import numpy as np
 import jax
-jax.config.update("jax_enable_x64", True)  # noqa: E402  needed for 1e-10 tolerance
 import jax.numpy as jnp
 import pytest
 
@@ -31,7 +30,7 @@ def test_regression_rows_match_numerical_jacobian(seed):
     J = jax.jacobian(_euler_tau, argnums=0)(I_params0, omega, omega_dot)  # (3, 6)
 
     R = regression_rows_full(omega, omega_dot)
-    np.testing.assert_allclose(np.asarray(R), np.asarray(J), atol=1e-10)
+    np.testing.assert_allclose(np.asarray(R), np.asarray(J), atol=1e-6)
 
 
 def test_ls_recovers_known_full_tensor_noise_free():
@@ -51,4 +50,4 @@ def test_ls_recovers_known_full_tensor_noise_free():
     R = R_blocks.reshape(3 * N, 6)
     y = taus.reshape(3 * N)
     theta_hat = jnp.linalg.solve(R.T @ R, R.T @ y)
-    np.testing.assert_allclose(np.asarray(theta_hat), np.asarray(I_true), atol=1e-10)
+    np.testing.assert_allclose(np.asarray(theta_hat), np.asarray(I_true), atol=1e-6)

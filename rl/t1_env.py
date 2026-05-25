@@ -2,8 +2,8 @@
 
 The agent commands reaction-wheel torque each dt. The environment integrates
 the rigid-body dynamics (via the JAX simulator), accumulates the Fisher
-Information Matrix (FIM) over diagonal inertia parameters, and rewards
-incremental D-optimal information gain.
+Information Matrix (FIM) over the full 6-parameter symmetric inertia tensor,
+and rewards incremental D-optimal information gain.
 
 Pure-functional: env_state passes through; works under jax.jit / jax.vmap.
 """

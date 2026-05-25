@@ -146,26 +146,39 @@ def make_env(cfg: T1EnvConfig) -> T1Env:
     return T1Env(cfg)
 
 
-def sample_sat(key, I_range: Tuple[float, float],
-               I_rw: float, rw_axes: jnp.ndarray,
-               rw_speed_max: float, rw_torque_max: float,
-               log_uniform: bool = False) -> SatParams:
-    """Sample a SatParams with diagonal inertia uniform in I_range per axis.
+def sample_sat(key, I_range, I_rw, rw_axes, rw_speed_max, rw_torque_max,
+               log_uniform: bool = False, max_tilt_angle: float = 0.0):
+    """Sample a SatParams with PSD inertia.
 
-    Off-diagonals are zero; this matches the LS estimator's diagonal model and
-    the FIM regression assumption.
-
-    When log_uniform=True, samples in log-space — better when I_range spans
-    multiple orders of magnitude (e.g., 0.1–20).
+    The diagonal eigenvalues are drawn uniform (or log-uniform) in I_range.
+    The eigenvectors are drawn by rotating the world frame about a random
+    unit axis by an angle U(0, max_tilt_angle). max_tilt_angle=0 reproduces
+    the previous diagonal-only behavior.
     """
+    k_diag, k_axis, k_angle = jax.random.split(key, 3)
     if log_uniform:
         log_lo, log_hi = jnp.log(I_range[0]), jnp.log(I_range[1])
-        log_diag = jax.random.uniform(key, (3,), minval=log_lo, maxval=log_hi)
+        log_diag = jax.random.uniform(k_diag, (3,), minval=log_lo, maxval=log_hi)
         diag = jnp.exp(log_diag)
     else:
-        diag = jax.random.uniform(key, (3,), minval=I_range[0], maxval=I_range[1])
-    I_sat = jnp.diag(diag)
-    I_inv = jnp.diag(1.0 / diag)
+        diag = jax.random.uniform(k_diag, (3,), minval=I_range[0], maxval=I_range[1])
+    Lam = jnp.diag(diag)
+
+    # Random unit axis on S^2
+    u_raw = jax.random.normal(k_axis, (3,))
+    u = u_raw / jnp.linalg.norm(u_raw)
+    theta = jax.random.uniform(k_angle, (), minval=0.0, maxval=max_tilt_angle)
+
+    # Rodrigues' formula
+    K = jnp.array([[0.0, -u[2],  u[1]],
+                   [u[2],  0.0, -u[0]],
+                   [-u[1], u[0],  0.0]])
+    R = jnp.eye(3) + jnp.sin(theta) * K + (1 - jnp.cos(theta)) * (K @ K)
+
+    I_sat = R @ Lam @ R.T
+    # Symmetrize against float32 roundoff (R @ Lam @ R.T is analytically symmetric).
+    I_sat = 0.5 * (I_sat + I_sat.T)
+    I_inv = jnp.linalg.inv(I_sat)
     return SatParams(
         I_sat=I_sat, I_inv=I_inv, I_rw=I_rw, rw_axes=rw_axes,
         rw_speed_max=rw_speed_max, rw_torque_max=rw_torque_max,

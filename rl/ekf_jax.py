@@ -48,9 +48,17 @@ def _floor_I_diag(x):
 
 
 def _project_psd_if_needed(x):
-    """Lazy guard: if min_eig(I) < threshold, eigendecompose, clip, recompose."""
+    """Lazy guard: if min_eig(I) < threshold, eigendecompose, clip, recompose.
+
+    The projection is wrapped in stop_gradient: `eigh` has NaN gradients near
+    degenerate eigenvalues, which surfaces during diff-sim training when the
+    optimizer takes gradients through the EKF rollout (the Jacobian via
+    `jax.jacobian` makes this a second-order autodiff path). Stopping gradient
+    is acceptable because the projection is a sparse, sample-level correction
+    of the state estimate; we don't need to learn it.
+    """
     I = _inertia_from_state(x)
-    eigs, V = jnp.linalg.eigh(I)
+    eigs, V = jnp.linalg.eigh(jax.lax.stop_gradient(I))
     needs_clip = eigs.min() < 1e-6
     eigs_safe = jnp.maximum(eigs, 1e-4 * jnp.maximum(eigs.max(), 1.0))
     I_safe = V @ jnp.diag(eigs_safe) @ V.T
@@ -64,6 +72,9 @@ def _project_psd_if_needed(x):
         x2 = x2.at[8].set(I_safe[1, 2])
         return x2
 
+    # Cond branches both run under vmap; the stop_gradient on I above already
+    # severs the autodiff path through eigh, so the result of _do_project is
+    # gradient-free w.r.t. the inputs (used as a numerical correction only).
     return jax.lax.cond(needs_clip, _do_project, lambda _: x, operand=None)
 
 

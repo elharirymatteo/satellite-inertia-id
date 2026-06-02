@@ -104,12 +104,52 @@ def run_receding_horizon(env, sat_true, key, horizon_total=150,
     return float(rel_err), float(np.mean(step_wall) * 1000)
 
 
+def _dr_prior_sat(sat_true):
+    """The 'expected I' under the DR prior: geometric mean of the log-uniform
+    range, zero off-diagonals. The one-shot MPC plans against this since no
+    observations are available before t=0."""
+    I_mean = float(np.exp(0.5 * (np.log(0.1) + np.log(20.0))))  # sqrt(0.1*20) ~ 1.414
+    I = jnp.eye(3) * I_mean
+    return SatParams(
+        I_sat=I, I_inv=jnp.linalg.inv(I),
+        I_rw=sat_true.I_rw, rw_axes=sat_true.rw_axes,
+        rw_speed_max=sat_true.rw_speed_max,
+        rw_torque_max=sat_true.rw_torque_max,
+    )
+
+
+def run_one_shot(env, sat_true, key, horizon_total=150, n_opt_steps=100):
+    """Plan the full 150-step trajectory once against the DR prior, then play
+    it open-loop on the true env. Returns (rel_err, ms/step)."""
+    state, _obs = env.reset(key, sat=sat_true)
+    sat_for_planning = _dr_prior_sat(sat_true)
+    t0 = time.perf_counter()
+    tau_plan = plan(state.sat_state, state.F_oracle, sat_for_planning,
+                    horizon=horizon_total, n_opt_steps=n_opt_steps,
+                    tau_max=env.cfg.tau_max,
+                    lr=0.01 * env.cfg.tau_max,
+                    dt=env.cfg.dt, substeps=env.cfg.substeps)
+    # Match run_receding_horizon: drop JAX's compilation cache after planning
+    # so the next seed/sat doesn't accumulate stale @jit closures.
+    tau_plan = jnp.asarray(np.asarray(tau_plan))
+    jax.clear_caches()
+    plan_wall = time.perf_counter() - t0
+    for k in range(horizon_total):
+        state, _obs, _r, _done, _info = env.step(state, tau_plan[k])
+    I_est_final = _ekf_inertia_matrix(state.ekf.x)
+    rel_err = (jnp.linalg.norm(I_est_final - sat_true.I_sat)
+               / jnp.linalg.norm(sat_true.I_sat))
+    return float(rel_err), float(plan_wall / horizon_total * 1000)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--horizon-mpc", type=int, default=20)
     ap.add_argument("--replan-every", type=int, default=10)
     ap.add_argument("--n-opt-steps", type=int, default=30)
     ap.add_argument("--seeds", type=int, default=32)
+    ap.add_argument("--oneshot", action="store_true",
+                    help="Use one-shot offline MPC instead of receding-horizon")
     args = ap.parse_args()
 
     with open(ROOT / "config_sat1.yaml") as f:
@@ -133,12 +173,17 @@ def main():
         errs, walls = [], []
         for s in range(args.seeds):
             key = jax.random.PRNGKey(1000 + s)
-            err, w = run_receding_horizon(env_s, sat, key,
-                                          horizon_mpc=args.horizon_mpc,
-                                          replan_every=args.replan_every,
-                                          n_opt_steps=args.n_opt_steps)
+            if args.oneshot:
+                err, w = run_one_shot(env_s, sat, key)
+                method_label = "dual-MPC (oneshot)"
+            else:
+                err, w = run_receding_horizon(env_s, sat, key,
+                                              horizon_mpc=args.horizon_mpc,
+                                              replan_every=args.replan_every,
+                                              n_opt_steps=args.n_opt_steps)
+                method_label = "dual-MPC (RH)"
             errs.append(err); walls.append(w)
-        print(f"{cfg_name.split('.')[0]:>14}  {'dual-MPC (RH)':>16}  "
+        print(f"{cfg_name.split('.')[0]:>14}  {method_label:>18}  "
               f"{np.mean(errs):>10.4%}  {np.mean(walls):>10.2f}")
 
 

@@ -59,18 +59,20 @@ class T1EnvEKF:
 
     def __init__(self, cfg: T1EnvEKFConfig):
         self.cfg = cfg
-        # Observation: ω_noisy(3) + rw_noisy(3)/rw_max + EKF I-estimate(3, normalized by I0)
-        #              + log of inertia-block cov diagonal(3) + progress(1) = 13-dim
-        self.obs_shape = (13,)
+        # Observation: ω_est(3) + rw_est(3)/rw_max + EKF I-estimate(6, normalized)
+        #              + log of inertia-block cov diagonal(6) + progress(1) = 19-dim
+        self.obs_shape = (19,)
 
     def _build_ekf_params(self, sat: SatParams) -> EKFParams:
+        diag_I = jnp.diag(sat.I_sat)
         return EKFParams(
             dt=self.cfg.dt,
             I_rw=jnp.full((3,), sat.I_rw),
             Qc=jnp.concatenate([
-                jnp.full((3,), self.cfg.Qc_omega),
-                self.cfg.Qc_I_rel * jnp.diag(sat.I_sat) ** 2,
-                jnp.full((3,), self.cfg.Qc_rw),
+                jnp.full((3,), self.cfg.Qc_omega),                          # omega
+                self.cfg.Qc_I_rel * diag_I ** 2,                            # I_diag
+                jnp.full((3,), self.cfg.Qc_I_rel * (diag_I.mean()) ** 2),   # I_off
+                jnp.full((3,), self.cfg.Qc_rw),                             # rw
             ]),
             R=jnp.concatenate([
                 jnp.full((3,), self.cfg.sigma_omega ** 2),
@@ -80,18 +82,20 @@ class T1EnvEKF:
 
     def reset(self, key, sat: SatParams | None = None):
         sat = sat if sat is not None else self.cfg.sat
-        k_omega, k_I, k_used = jax.random.split(key, 3)
+        k_omega, k_used = jax.random.split(key, 2)
         omega0 = self.cfg.init_omega_scale * jax.random.normal(k_omega, (3,))
         rw0 = jnp.zeros(3)
         sat_state = jnp.concatenate([omega0, rw0])
 
-        true_I = jnp.diag(sat.I_sat)
-        I_init = self.cfg.I0_scale * true_I  # biased initial estimate
-        sigma_I = self.cfg.sigma_I0_rel * true_I
-        x0 = jnp.concatenate([omega0, I_init, rw0])
+        diag_true = jnp.diag(sat.I_sat)
+        I_diag_init = self.cfg.I0_scale * diag_true  # biased initial diagonal
+        sigma_I_diag = self.cfg.sigma_I0_rel * diag_true
+        sigma_I_off = jnp.full((3,), self.cfg.sigma_I0_rel * diag_true.mean())
+        x0 = jnp.concatenate([omega0, I_diag_init, jnp.zeros(3), rw0])
         P0 = jnp.diag(jnp.concatenate([
             jnp.full((3,), 1e-4),
-            sigma_I ** 2,
+            sigma_I_diag ** 2,
+            sigma_I_off ** 2,
             jnp.full((3,), 1e-2),
         ]))
         ekf_state = EKFState(x=x0, P=P0)
@@ -137,10 +141,16 @@ class T1EnvEKF:
 
         # Reward signals
         sat_pen = _saturation_penalty(sat, tau_cmd, new_rw_true)
-        I_true = jnp.diag(sat.I_sat)
-        I_est = new_ekf.x[3:6]
-        # Negative squared relative I-estimation error (uses ground truth — OK in sim).
-        rel_sq_err = jnp.sum(((I_est - I_true) / I_true) ** 2)
+        I_true_mat = sat.I_sat
+        # Reconstruct full symmetric 3x3 inertia from the 12-dim EKF state.
+        I_est_mat = jnp.array([
+            [new_ekf.x[3], new_ekf.x[6], new_ekf.x[7]],
+            [new_ekf.x[6], new_ekf.x[4], new_ekf.x[8]],
+            [new_ekf.x[7], new_ekf.x[8], new_ekf.x[5]],
+        ])
+        # Squared Frobenius relative error over the full tensor.
+        rel_sq_err = (jnp.linalg.norm(I_est_mat - I_true_mat) ** 2
+                      / jnp.linalg.norm(I_true_mat) ** 2)
         if cfg.reward_mode == "neg_rel_err":
             reward_unpenalized = -rel_sq_err
         else:  # "info_gain"
@@ -160,8 +170,8 @@ class T1EnvEKF:
             "info_gain": info_gain,
             "sat_pen": sat_pen,
             "logdet_F_oracle": ld_oracle,
-            "I_est": new_ekf.x[3:6],
-            "I_true": jnp.diag(sat.I_sat),
+            "I_est": jnp.concatenate([new_ekf.x[3:6], new_ekf.x[6:9]]),
+            "I_true": I_true_mat,
             "rel_sq_err": rel_sq_err,
         }
         return new_state, obs, reward, done, info
@@ -171,18 +181,29 @@ class T1EnvEKF:
         # Observed (noisy) state from EKF — use the EKF's filtered estimate of ω.
         # (The agent never sees true ω directly under this env.)
         omega_est = ekf.x[0:3]
-        rw_est = ekf.x[6:9]
-        I_est = ekf.x[3:6]
-        # Diagonal of the I-block covariance, log-scaled (always positive).
-        P_I_diag = jnp.diag(ekf.P[3:6, 3:6])
-        # Normalize: I_est by self.cfg.sat.I_sat diagonal (fixed reference) so
-        # the policy sees a roughly O(1) signal across very different sats.
-        ref_I = jnp.diag(self.cfg.sat.I_sat)
+        I_diag = ekf.x[3:6]
+        I_off = ekf.x[6:9]
+        rw_est = ekf.x[9:12]
+        I_est = jnp.concatenate([I_diag, I_off])
+        # Diagonal of the 6x6 inertia-block covariance, log-scaled.
+        P_I_diag = jnp.diag(ekf.P[3:9, 3:9])
+        # Normalize: I_est by a fixed reference built from cfg.sat so the policy
+        # sees a roughly O(1) signal across very different sats. Off-diagonal
+        # reference is bounded below to keep the normalization stable when the
+        # nominal off-diagonals are near zero.
+        ref_I3 = jnp.diag(self.cfg.sat.I_sat)
+        ref_off = jnp.array([self.cfg.sat.I_sat[0, 1],
+                             self.cfg.sat.I_sat[0, 2],
+                             self.cfg.sat.I_sat[1, 2]])
+        ref_norm = jnp.concatenate([
+            ref_I3,
+            jnp.maximum(jnp.abs(ref_off), 0.01 * ref_I3.mean()),
+        ])
         progress = env_state.step.astype(jnp.float32) / self.cfg.horizon
         return jnp.concatenate([
             omega_est,
             rw_est / self.cfg.sat.rw_speed_max,
-            I_est / ref_I,
+            I_est / ref_norm,
             jnp.log(jnp.maximum(P_I_diag, 1e-30)),
             jnp.array([progress]),
         ])

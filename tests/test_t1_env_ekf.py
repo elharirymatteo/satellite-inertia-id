@@ -44,6 +44,9 @@ def _build_cfg() -> T1EnvEKFConfig:
     )
 
 
+@pytest.mark.xfail(reason="EKF/obs extended to full 6-param tensor (F1); "
+                          "this env-level test hard-codes the old 9-dim EKF "
+                          "shape. Replaced by tests/test_envs_smoke.py.")
 def test_ekf_env_reset_shapes():
     env = make_env_ekf(_build_cfg())
     state, obs = env.reset(jax.random.PRNGKey(0))

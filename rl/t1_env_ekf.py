@@ -19,7 +19,7 @@ import jax
 import jax.numpy as jnp
 
 from sim.dynamics_jax import SatParams, _step_dt
-from rl.ekf_jax import EKFParams, EKFState, step as ekf_step
+from rl.ekf_jax import EKFParams, EKFState, step as ekf_step, inertia_from_state
 from rl.t1_env import _fim_row_contribution, _slogdet_psd, _saturation_penalty
 
 
@@ -142,12 +142,7 @@ class T1EnvEKF:
         # Reward signals
         sat_pen = _saturation_penalty(sat, tau_cmd, new_rw_true)
         I_true_mat = sat.I_sat
-        # Reconstruct full symmetric 3x3 inertia from the 12-dim EKF state.
-        I_est_mat = jnp.array([
-            [new_ekf.x[3], new_ekf.x[6], new_ekf.x[7]],
-            [new_ekf.x[6], new_ekf.x[4], new_ekf.x[8]],
-            [new_ekf.x[7], new_ekf.x[8], new_ekf.x[5]],
-        ])
+        I_est_mat = inertia_from_state(new_ekf.x)
         # Squared Frobenius relative error over the full tensor.
         rel_sq_err = (jnp.linalg.norm(I_est_mat - I_true_mat) ** 2
                       / jnp.linalg.norm(I_true_mat) ** 2)

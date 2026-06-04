@@ -29,6 +29,7 @@ import optax
 from sim.dynamics_jax import SatParams
 from rl.t1_env_ekf import T1EnvEKFConfig, make_env_ekf
 from rl.t1_env import sample_sat
+from rl.ekf_jax import inertia_from_state
 from rl import policy as policy_mod
 from control.torque_generators import generate_torque_profile
 
@@ -94,9 +95,12 @@ def make_dr_rollout(env, horizon, tau_max, sat_template, I_range):
             body, (state, obs), None, length=horizon
         )
         # Final inertia estimation error for reporting
-        I_est = final.ekf.x[3:6]
-        I_true = jnp.diag(sat.I_sat)
-        rel_err = jnp.linalg.norm(I_est - I_true) / jnp.linalg.norm(I_true)
+        # Full-tensor Frobenius rel_err — matches the metric used by the env's
+        # neg_rel_err reward and the unified baselines eval table.
+        I_est_mat = inertia_from_state(final.ekf.x)
+        I_true_mat = sat.I_sat
+        rel_err = (jnp.linalg.norm(I_est_mat - I_true_mat)
+                   / jnp.linalg.norm(I_true_mat))
         return rewards.sum(), ld_orc[-1], rel_err
     return rollout
 
@@ -112,9 +116,12 @@ def make_eval_rollout(env, horizon, tau_max):
         (final, _), (rewards, ig, ld_orc) = jax.lax.scan(
             body, (state, obs), None, length=horizon
         )
-        I_est = final.ekf.x[3:6]
-        I_true = jnp.diag(sat.I_sat)
-        rel_err = jnp.linalg.norm(I_est - I_true) / jnp.linalg.norm(I_true)
+        # Full-tensor Frobenius rel_err — matches the metric used by the env's
+        # neg_rel_err reward and the unified baselines eval table.
+        I_est_mat = inertia_from_state(final.ekf.x)
+        I_true_mat = sat.I_sat
+        rel_err = (jnp.linalg.norm(I_est_mat - I_true_mat)
+                   / jnp.linalg.norm(I_true_mat))
         return rewards.sum(), ld_orc[-1], rel_err
     return rollout
 
@@ -129,9 +136,12 @@ def scripted_rollout(env, horizon, tau_max):
         (final, _), (rewards, ig, ld_orc) = jax.lax.scan(
             body, (state, obs), actions_seq
         )
-        I_est = final.ekf.x[3:6]
-        I_true = jnp.diag(sat.I_sat)
-        rel_err = jnp.linalg.norm(I_est - I_true) / jnp.linalg.norm(I_true)
+        # Full-tensor Frobenius rel_err — matches the metric used by the env's
+        # neg_rel_err reward and the unified baselines eval table.
+        I_est_mat = inertia_from_state(final.ekf.x)
+        I_true_mat = sat.I_sat
+        rel_err = (jnp.linalg.norm(I_est_mat - I_true_mat)
+                   / jnp.linalg.norm(I_true_mat))
         return rewards.sum(), ld_orc[-1], rel_err
     return rollout
 

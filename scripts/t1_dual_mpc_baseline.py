@@ -23,6 +23,7 @@ import jax.numpy as jnp
 
 from sim.dynamics_jax import SatParams
 from rl.t1_env_ekf import T1EnvEKFConfig, make_env_ekf
+from rl.ekf_jax import inertia_from_state
 from control.dual_mpc import plan
 
 
@@ -40,15 +41,9 @@ def _load_sat(cfg_name):
     )
 
 
-def _ekf_inertia_matrix(ekf_x):
-    """Reconstruct the 3x3 I from the EKF state x[3:9] in the 12-dim layout."""
-    Ixx, Iyy, Izz = ekf_x[3], ekf_x[4], ekf_x[5]
-    Ixy, Ixz, Iyz = ekf_x[6], ekf_x[7], ekf_x[8]
-    return jnp.array([
-        [Ixx, Ixy, Ixz],
-        [Ixy, Iyy, Iyz],
-        [Ixz, Iyz, Izz],
-    ])
+# Backwards-compatible alias — the canonical helper lives in rl/ekf_jax.py.
+# Kept under this name because scripts/t1_all_baselines.py imports it.
+_ekf_inertia_matrix = inertia_from_state
 
 
 def run_receding_horizon(env, sat_true, key, horizon_total=150,

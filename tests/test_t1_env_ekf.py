@@ -60,9 +60,6 @@ def test_ekf_env_reset_shapes():
                                np.asarray(cfg.I0_scale * true_I), atol=1e-6)
 
 
-@pytest.mark.xfail(reason="EKF extended to full 6-param tensor (F1); "
-                          "this env-level test assumes old 9-dim EKF state. "
-                          "Replaced by tests in T4.")
 def test_ekf_env_step_runs_to_horizon():
     cfg = _build_cfg()._replace(horizon=10)
     env = make_env_ekf(cfg)
@@ -75,9 +72,6 @@ def test_ekf_env_step_runs_to_horizon():
     assert done and n == cfg.horizon
 
 
-@pytest.mark.xfail(reason="EKF extended to full 6-param tensor (F1); "
-                          "this env-level test assumes old 9-dim EKF state. "
-                          "Replaced by tests in T4.")
 def test_ekf_inertia_estimate_converges_under_excitation():
     """With random torques over many steps, EKF estimate should approach truth."""
     env = make_env_ekf(_build_cfg())
@@ -101,9 +95,6 @@ def test_ekf_inertia_estimate_converges_under_excitation():
     )
 
 
-@pytest.mark.xfail(reason="EKF extended to full 6-param tensor (F1); "
-                          "this env-level test assumes old 9-dim EKF state. "
-                          "Replaced by tests in T4.")
 def test_ekf_env_cumulative_reward_positive_with_excitation():
     """80 steps of random torque should yield positive cumulative info gain."""
     env = make_env_ekf(_build_cfg())
@@ -119,9 +110,6 @@ def test_ekf_env_cumulative_reward_positive_with_excitation():
     assert R_tot > 0, f"expected positive cumulative reward, got {R_tot}"
 
 
-@pytest.mark.xfail(reason="EKF extended to full 6-param tensor (F1); "
-                          "this env-level test assumes old 9-dim EKF state. "
-                          "Replaced by tests in T4.")
 def test_ekf_env_jit_and_vmap():
     cfg = _build_cfg()._replace(horizon=20)
     env = make_env_ekf(cfg)

@@ -29,8 +29,14 @@ def _skew(v):
     ])
 
 
-def _inertia_from_state(x):
-    """Build the 3x3 symmetric I from x[3:9]."""
+def inertia_from_state(x):
+    """Build the 3x3 symmetric I from the EKF state vector x[3:9].
+
+    Public helper: the EKF state's inertia block uses the convention
+    x[3:6] = (Ixx, Iyy, Izz) and x[6:9] = (Ixy, Ixz, Iyz). Returning the
+    matrix form is needed by the env (reward), the MPC driver (planning
+    against the EKF mean), and the unified eval (Frobenius rel_err).
+    """
     Ixx, Iyy, Izz = x[3], x[4], x[5]
     Ixy, Ixz, Iyz = x[6], x[7], x[8]
     return jnp.array([
@@ -38,6 +44,10 @@ def _inertia_from_state(x):
         [Ixy, Iyy, Iyz],
         [Ixz, Iyz, Izz],
     ])
+
+
+# Alias for callers inside this module that used the underscored name.
+_inertia_from_state = inertia_from_state
 
 
 def _floor_I_diag(x):

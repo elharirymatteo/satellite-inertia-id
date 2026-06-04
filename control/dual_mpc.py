@@ -7,6 +7,7 @@ sequence over a horizon, and returns it after a fixed number of Adam steps.
 Pure JAX; designed to be jit-compiled and vmap-compatible over batches.
 """
 from __future__ import annotations
+import functools
 import jax
 import jax.numpy as jnp
 import optax
@@ -14,17 +15,10 @@ import optax
 from sim.dynamics_jax import SatParams, _step_dt
 from utils.observability import regression_rows_full
 
-
-def _slogdet_psd_6(F, eps):
-    L = jnp.linalg.cholesky(F + eps * jnp.eye(6))
-    return 2.0 * jnp.sum(jnp.log(jnp.diag(L)))
-
-
-def _saturation_penalty(sat, tau, rw_speed):
-    tau_excess = jnp.maximum(jnp.abs(tau) - sat.rw_torque_max, 0.0)
-    speed_excess = jnp.maximum(jnp.abs(rw_speed) - 0.95 * sat.rw_speed_max, 0.0)
-    return (tau_excess.sum() / (sat.rw_torque_max + 1e-12)
-            + speed_excess.sum() / (sat.rw_speed_max + 1e-12))
+# Shared helpers live in rl/t1_env.py — the env uses the exact same FIM
+# log-det and saturation penalty, so the MPC plans against the same scoring
+# the policy is rewarded by.
+from rl.t1_env import _slogdet_psd, _saturation_penalty
 
 
 def _rollout_loss(z, init_state, F0, sat, horizon, dt, substeps,
@@ -51,8 +45,43 @@ def _rollout_loss(z, init_state, F0, sat, horizon, dt, substeps,
     (final_state, F_final, _), sat_pens = jax.lax.scan(
         body, (init_state, F0, last_omega_init), tau_seq
     )
-    ld = _slogdet_psd_6(F_final, fim_eps)
+    ld = _slogdet_psd(F_final, fim_eps)
     return -ld + sat_penalty * sat_pens.sum()
+
+
+def _make_optimizer(lr: float):
+    """Adam + global-norm clip + NaN scrubbing."""
+    return optax.chain(
+        optax.zero_nans(),
+        optax.clip_by_global_norm(1.0),
+        optax.adam(lr),
+    )
+
+
+@functools.partial(jax.jit, static_argnames=("horizon", "substeps"))
+def _adam_step(z, opt_state, init_state, F0, sat,
+               tau_max, sat_penalty, fim_eps, lr,
+               horizon, dt, substeps):
+    """One Adam step on z toward minimizing _rollout_loss.
+
+    Module-level + jitted so its XLA trace is cached across the many replan
+    calls within an episode — and across episodes — rather than re-tracing
+    every time `plan()` is invoked (which was the root cause of the LLVM JIT
+    memory growth that motivated the `jax.clear_caches()` band-aid).
+
+    `horizon`/`dt`/`substeps` are kwargs that travel as static args (they
+    affect the scan length and substep count); `sat`, `init_state`, `F0`,
+    and the scalar weights flow as runtime values, so changing them across
+    replans within an episode does NOT trigger retraces.
+    """
+    opt = _make_optimizer(lr)
+    loss, g = jax.value_and_grad(_rollout_loss)(
+        z, init_state, F0, sat, horizon, dt, substeps,
+        tau_max, sat_penalty, fim_eps,
+    )
+    updates, opt_state = opt.update(g, opt_state)
+    z = optax.apply_updates(z, updates)
+    return z, opt_state, loss
 
 
 def plan(init_state, F0, sat: SatParams, *, horizon: int,
@@ -81,23 +110,13 @@ def plan(init_state, F0, sat: SatParams, *, horizon: int,
         ], axis=-1)
         z = seed
 
-    opt = optax.chain(
-        optax.zero_nans(),
-        optax.clip_by_global_norm(1.0),
-        optax.adam(lr),
-    )
+    opt = _make_optimizer(lr)
     opt_state = opt.init(z)
 
-    @jax.jit
-    def grad_step(z, opt_state):
-        loss, g = jax.value_and_grad(_rollout_loss)(
-            z, init_state, F0, sat, horizon, dt, substeps,
-            tau_max, sat_penalty, fim_eps,
-        )
-        updates, opt_state = opt.update(g, opt_state)
-        z = optax.apply_updates(z, updates)
-        return z, opt_state, loss
-
     for _ in range(n_opt_steps):
-        z, opt_state, _ = grad_step(z, opt_state)
+        z, opt_state, _ = _adam_step(
+            z, opt_state, init_state, F0, sat,
+            tau_max, sat_penalty, fim_eps, lr,
+            horizon=horizon, dt=dt, substeps=substeps,
+        )
     return tau_max * jnp.tanh(z)

@@ -90,7 +90,9 @@ class T1EnvEKF:
         diag_true = jnp.diag(sat.I_sat)
         I_diag_init = self.cfg.I0_scale * diag_true  # biased initial diagonal
         sigma_I_diag = self.cfg.sigma_I0_rel * diag_true
-        sigma_I_off = jnp.full((3,), self.cfg.sigma_I0_rel * diag_true.mean())
+        # Off-diag prior 6x tighter than diag: real spacecraft have small
+        # off-diagonals; loose prior here lets the Kalman update over-correct.
+        sigma_I_off = jnp.full((3,), 0.05 * diag_true.mean())
         x0 = jnp.concatenate([omega0, I_diag_init, jnp.zeros(3), rw0])
         P0 = jnp.diag(jnp.concatenate([
             jnp.full((3,), 1e-4),

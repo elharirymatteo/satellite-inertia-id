@@ -58,20 +58,25 @@ def _floor_I_diag(x):
 
 
 def _project_psd_if_needed(x):
-    """Lazy guard: if min_eig(I) < threshold, eigendecompose, clip, recompose.
+    """Cauchy-Schwarz off-diag clip + eigval floor on I. stop_gradient on
+    eigh (NaN grads at degenerate eigs; this is a forward-only correction)."""
+    MAX_OFFDIAG_RATIO = 0.4
+    MIN_COND_RATIO = 0.02
 
-    The projection is wrapped in stop_gradient: `eigh` has NaN gradients near
-    degenerate eigenvalues, which surfaces during diff-sim training when the
-    optimizer takes gradients through the EKF rollout (the Jacobian via
-    `jax.jacobian` makes this a second-order autodiff path). Stopping gradient
-    is acceptable because the projection is a sparse, sample-level correction
-    of the state estimate; we don't need to learn it.
-    """
+    I_diag = jnp.maximum(x[3:6], I_DIAG_FLOOR)
+    Ixx, Iyy, Izz = I_diag[0], I_diag[1], I_diag[2]
+    x = x.at[6].set(jnp.clip(x[6], -MAX_OFFDIAG_RATIO * jnp.sqrt(Ixx * Iyy),
+                                   MAX_OFFDIAG_RATIO * jnp.sqrt(Ixx * Iyy)))
+    x = x.at[7].set(jnp.clip(x[7], -MAX_OFFDIAG_RATIO * jnp.sqrt(Ixx * Izz),
+                                   MAX_OFFDIAG_RATIO * jnp.sqrt(Ixx * Izz)))
+    x = x.at[8].set(jnp.clip(x[8], -MAX_OFFDIAG_RATIO * jnp.sqrt(Iyy * Izz),
+                                   MAX_OFFDIAG_RATIO * jnp.sqrt(Iyy * Izz)))
+
     I = _inertia_from_state(x)
     eigs, V = jnp.linalg.eigh(jax.lax.stop_gradient(I))
-    needs_clip = eigs.min() < 1e-6
-    eigs_safe = jnp.maximum(eigs, 1e-4 * jnp.maximum(eigs.max(), 1.0))
-    I_safe = V @ jnp.diag(eigs_safe) @ V.T
+    floor = MIN_COND_RATIO * jnp.maximum(eigs.max(), I_DIAG_FLOOR)
+    needs_clip = eigs.min() < floor
+    I_safe = V @ jnp.diag(jnp.maximum(eigs, floor)) @ V.T
 
     def _do_project(_):
         x2 = x.at[3].set(I_safe[0, 0])
@@ -82,9 +87,6 @@ def _project_psd_if_needed(x):
         x2 = x2.at[8].set(I_safe[1, 2])
         return x2
 
-    # Cond branches both run under vmap; the stop_gradient on I above already
-    # severs the autodiff path through eigh, so the result of _do_project is
-    # gradient-free w.r.t. the inputs (used as a numerical correction only).
     return jax.lax.cond(needs_clip, _do_project, lambda _: x, operand=None)
 
 
@@ -136,17 +138,26 @@ def f(x, u, params: EKFParams, tau_ext=None):
     ])
 
 
-def analytic_F(x, u, params: EKFParams, tau_ext=None):
-    """Discrete-time Jacobian F = d(x + dt * f(x, u)) / dx via jax.jacobian.
+# Forward-Euler substeps within one dt; true dynamics use 10 RK4 substeps.
+EKF_PREDICT_SUBSTEPS = 5
 
-    Closed-form (auto-derived). Acceptable per the F1 task spec; can be
-    replaced by a hand-derived expression later for speed.
-    """
-    return jax.jacobian(lambda xx: xx + params.dt * f(xx, u, params, tau_ext))(x)
+
+def _predict_mean(x, u, params: EKFParams, tau_ext, n_substeps: int):
+    h = params.dt / n_substeps
+    def body(xx, _):
+        return xx + h * f(xx, u, params, tau_ext), None
+    new_x, _ = jax.lax.scan(body, x, None, length=n_substeps)
+    return new_x
+
+
+def analytic_F(x, u, params: EKFParams, tau_ext=None):
+    return jax.jacobian(
+        lambda xx: _predict_mean(xx, u, params, tau_ext, EKF_PREDICT_SUBSTEPS)
+    )(x)
 
 
 def predict(state: EKFState, u, params: EKFParams, tau_ext=None) -> EKFState:
-    x_pred = state.x + params.dt * f(state.x, u, params, tau_ext)
+    x_pred = _predict_mean(state.x, u, params, tau_ext, EKF_PREDICT_SUBSTEPS)
     F = analytic_F(state.x, u, params, tau_ext)
     Qd = jnp.diag(params.Qc * params.dt)
     P_pred = F @ state.P @ F.T + Qd

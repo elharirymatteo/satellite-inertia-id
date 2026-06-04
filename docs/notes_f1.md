@@ -1,5 +1,38 @@
 # F1 — known issues and gaps from the retrained full-tensor DR policy
 
+## 2026-06-05 update — partial sat1 fix attempt
+
+Three numerical guards were added to `rl/ekf_jax.py` and `rl/t1_env_ekf.py`:
+
+1. **Multi-substep EKF predict** (`EKF_PREDICT_SUBSTEPS = 5`): replace the
+   single-step forward Euler in `predict` with 5 Euler substeps over
+   `params.dt`. The reviewer's recommendation.
+2. **Cauchy-Schwarz off-diagonal clip** in `_project_psd_if_needed`: bound
+   each `|I_ij|` to `0.4 * sqrt(I_ii * I_jj)` so the Kalman update can't
+   manufacture huge off-diagonals to "explain" omega innovations.
+3. **Tighter off-diagonal prior** in `T1EnvEKF.reset`: initial cov on
+   `(Ixy, Ixz, Iyz)` uses `0.05 * mean(I_diag)` instead of the diagonal's
+   `0.30 * mean(I_diag)` — a 6× tighter prior matching the spec.
+
+**Result:** sat2/sat3 rel_err is roughly unchanged (~1.5–1.7%). sat1 is
+still unreliable. The deeper issue is that `config_sat1.yaml` uses
+`dt = 1.0 s`, so even with 5 EKF substeps each predict spans 0.2 s of
+real dynamics — coarse for the small-inertia / high-relative-torque
+CubeSat regime where omega grows fast. The Euler-based EKF linearization
+fundamentally cannot keep up. Real options remaining:
+
+- Use a UKF (sigma-point Kalman filter) on the inertia block — handles
+  the nonlinear coupling much better at the cost of ~2-3× compute.
+- Drop `dt` to 0.1 s for sat1 (config edit) so the EKF predict has the
+  same temporal resolution as the true dynamics. Will require retraining.
+- Restrict the DR sampling lower bound from 0.1 to ~0.5 so the policy is
+  never trained against the extreme small-inertia regime.
+
+None of these are a one-line fix; sat1 is left in the "known limitation"
+column for now.
+
+
+
 After F1 (full inertia tensor + 12-dim EKF + rotation-based DR sampler), the retrained DR policy on the held-out CubeSat/MicroSat/SmallSat configs (`docs/t1_dr_ekf_full_tensor_neg_rel_err_eval.txt`):
 
 | Sat | DR policy rel_err | diagonal-only baseline | Verdict |

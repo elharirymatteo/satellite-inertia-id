@@ -176,7 +176,7 @@ def main():
     base_cfg = _build_cfg(horizon=args.horizon, reward_mode=args.reward_mode,
                           tau_max_override=args.tau_max)
     env = make_env_ekf(base_cfg)
-    I_range = (0.1, 20.0)
+    I_range = (0.3, 20.0)
     rollout_dr = make_dr_rollout(env, args.horizon, base_cfg.tau_max,
                                  base_cfg.sat, I_range)
 

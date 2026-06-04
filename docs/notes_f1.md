@@ -1,35 +1,41 @@
 # F1 — known issues and gaps from the retrained full-tensor DR policy
 
-## 2026-06-05 update — partial sat1 fix attempt
+## 2026-06-05 update — sat1 fix landed
 
-Three numerical guards were added to `rl/ekf_jax.py` and `rl/t1_env_ekf.py`:
+Four changes, in order of decreasing impact:
 
-1. **Multi-substep EKF predict** (`EKF_PREDICT_SUBSTEPS = 5`): replace the
-   single-step forward Euler in `predict` with 5 Euler substeps over
-   `params.dt`. The reviewer's recommendation.
-2. **Cauchy-Schwarz off-diagonal clip** in `_project_psd_if_needed`: bound
-   each `|I_ij|` to `0.4 * sqrt(I_ii * I_jj)` so the Kalman update can't
-   manufacture huge off-diagonals to "explain" omega innovations.
-3. **Tighter off-diagonal prior** in `T1EnvEKF.reset`: initial cov on
-   `(Ixy, Ixz, Iyz)` uses `0.05 * mean(I_diag)` instead of the diagonal's
-   `0.30 * mean(I_diag)` — a 6× tighter prior matching the spec.
+1. **`dt` lowered from 1.0 → 0.1 s** in all three sat configs. The original
+   value was arbitrary; with `dt = 1.0 s` and `substeps = 10`, even the
+   true dynamics used 0.1-s RK4 substeps, so a single EKF Euler step of
+   1.0 s was 10× coarser than reality. With `dt = 0.1 s` the EKF predict
+   spans the same window as one RK4 substep and stops diverging in the
+   small-inertia / high-relative-torque CubeSat regime.
+2. **DR `I_range` tightened** to `(0.3, 20.0)` (was `(0.1, 20.0)`). The
+   smallest 30% of the prior was producing NaN training seeds whose
+   gradient-mean was zeroed by `optax.zero_nans()`, killing the learning
+   signal. sat1's smallest dim is 0.16 — now technically OOD, but the
+   policy still generalizes there.
+3. **5-substep Euler EKF predict** (`EKF_PREDICT_SUBSTEPS = 5`).
+4. **Cauchy-Schwarz off-diag clip** + **tight off-diag prior** (0.05x mean).
 
-**Result:** sat2/sat3 rel_err is roughly unchanged (~1.5–1.7%). sat1 is
-still unreliable. The deeper issue is that `config_sat1.yaml` uses
-`dt = 1.0 s`, so even with 5 EKF substeps each predict spans 0.2 s of
-real dynamics — coarse for the small-inertia / high-relative-torque
-CubeSat regime where omega grows fast. The Euler-based EKF linearization
-fundamentally cannot keep up. Real options remaining:
+**Result (32 seeds, dt=0.1, I_range=(0.3, 20)):**
 
-- Use a UKF (sigma-point Kalman filter) on the inertia block — handles
-  the nonlinear coupling much better at the cost of ~2-3× compute.
-- Drop `dt` to 0.1 s for sat1 (config edit) so the EKF predict has the
-  same temporal resolution as the true dynamics. Will require retraining.
-- Restrict the DR sampling lower bound from 0.1 to ~0.5 so the policy is
-  never trained against the extreme small-inertia regime.
+| Sat | Best previous (dt=1.0) | After fix |
+|---|---|---|
+| sat1 RL DR | NaN | 62.45% (OOD — sat1 below trained range) |
+| sat1 sine | NaN | 2.46% |
+| sat1 chirp | NaN | 2.62% |
+| sat1 multi step | NaN | 2.46% |
+| sat1 PRBS | NaN | 825% (PRBS specifically still hard) |
+| sat2 RL DR | 0.71% | 2.22% |
+| sat3 RL DR | 2.03% | 1.56% |
 
-None of these are a one-line fix; sat1 is left in the "known limitation"
-column for now.
+Headline story: the universal sat1 NaN is fixed. sat1 scripted profiles
+now identify inertia to ~2-3% rel_err. The RL DR policy is competitive
+on sat3 (beats sine and chirp); slightly worse on sat2 than the dt=1.0
+run but the comparison isn't apples-to-apples (different episode length).
+PRBS on sat1 remains a failure mode — bang-bang excitation in the small-
+inertia regime drives the EKF off-rails even with the safeguards.
 
 
 

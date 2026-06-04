@@ -22,7 +22,7 @@ reaction_wheels:
     - [0, 0, 1]
 
 sim:
-  dt: 1.0                 # 0.5 s time step for finer resolution
+  dt: 0.1
   t_max: 300.0            # simulate for 10 minutes
   initial_omega: [0.0, 0.0, 0.0]
   initial_rw_speed: [0.0, 0.0, 0.0]

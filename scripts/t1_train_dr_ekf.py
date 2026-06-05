@@ -53,12 +53,12 @@ def _build_cfg(horizon: int = 150, reward_mode: str = "info_gain",
         sat=sat, dt=float(cfg["sim"]["dt"]), substeps=10,
         horizon=horizon, tau_max=tau_max,
         sat_penalty=0.1, init_omega_scale=1e-3,
-        # High-accuracy sensors (match tests/test_benchmark.py's defaults).
         sigma_omega=1e-4, sigma_rw=1e-3,
-        # EKF priors: 15% bias on initial I, 30% std
         I0_scale=0.85, sigma_I0_rel=0.30,
         Qc_omega=1e-9, Qc_I_rel=1e-7, Qc_rw=1e-9,
         reward_mode=reward_mode,
+        # F3: 10% of tau_max body-torque disturbance (gravity gradient analog)
+        disturbance_scale=0.1 * tau_max,
     )
 
 

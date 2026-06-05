@@ -150,14 +150,16 @@ def main():
     with open(ROOT / "config_sat1.yaml") as f:
         cfg_y = yaml.safe_load(f)
     sat1 = _load_sat("config_sat1.yaml")
+    tau_max = float(cfg_y["reaction_wheels"]["max_torque"])
     base_cfg = T1EnvEKFConfig(
         sat=sat1, dt=float(cfg_y["sim"]["dt"]), substeps=10,
-        horizon=150, tau_max=float(cfg_y["reaction_wheels"]["max_torque"]),
+        horizon=150, tau_max=tau_max,
         sat_penalty=0.1, init_omega_scale=1e-3,
         sigma_omega=1e-4, sigma_rw=1e-3,
         I0_scale=0.85, sigma_I0_rel=0.30,
         Qc_omega=1e-9, Qc_I_rel=1e-7, Qc_rw=1e-9,
         reward_mode="neg_rel_err",
+        disturbance_scale=0.1 * tau_max,
     )
 
     print(f"{'sat':>14}  {'method':>16}  {'rel_err':>10}  {'ms/step':>10}")

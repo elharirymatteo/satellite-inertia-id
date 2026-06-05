@@ -53,8 +53,10 @@ def _apply_rw_limits(rw_speeds: jnp.ndarray, rw_acc_unlim: jnp.ndarray,
     return rw_acc, tau_actual
 
 
-def _deriv(state: jnp.ndarray, tau_cmd: jnp.ndarray, p: SatParams):
-    """xdot = f(x, u). Pure function. state = [omega(3), rw_speed(3)]."""
+def _deriv(state: jnp.ndarray, tau_cmd: jnp.ndarray, p: SatParams,
+           tau_ext: jnp.ndarray | None = None):
+    """xdot = f(x, u). state = [omega(3), rw_speed(3)]. tau_ext is an
+    external body-frame torque (gravity gradient, residual aero, etc.)."""
     omega = state[0:3]
     rw_speeds = state[3:6]
     rw_acc_unlim = tau_cmd / p.I_rw
@@ -62,24 +64,25 @@ def _deriv(state: jnp.ndarray, tau_cmd: jnp.ndarray, p: SatParams):
     h_rw_total = p.rw_axes.T @ (p.I_rw * rw_speeds)
     h_rw_dot = p.rw_axes.T @ (p.I_rw * rw_acc)
     h_total = p.I_sat @ omega + h_rw_total
-    domega = p.I_inv @ (-jnp.cross(omega, h_total) - h_rw_dot)
+    ext = jnp.zeros(3) if tau_ext is None else tau_ext
+    domega = p.I_inv @ (ext - jnp.cross(omega, h_total) - h_rw_dot)
     return jnp.concatenate([domega, rw_acc])
 
 
-def rk4_step(state: jnp.ndarray, tau_cmd: jnp.ndarray, p: SatParams, h: float):
-    """One RK4 substep with zero-order-hold control."""
-    k1 = _deriv(state, tau_cmd, p)
-    k2 = _deriv(state + (h * 0.5) * k1, tau_cmd, p)
-    k3 = _deriv(state + (h * 0.5) * k2, tau_cmd, p)
-    k4 = _deriv(state + h * k3, tau_cmd, p)
+def rk4_step(state: jnp.ndarray, tau_cmd: jnp.ndarray, p: SatParams, h: float,
+             tau_ext: jnp.ndarray | None = None):
+    k1 = _deriv(state, tau_cmd, p, tau_ext)
+    k2 = _deriv(state + (h * 0.5) * k1, tau_cmd, p, tau_ext)
+    k3 = _deriv(state + (h * 0.5) * k2, tau_cmd, p, tau_ext)
+    k4 = _deriv(state + h * k3, tau_cmd, p, tau_ext)
     return state + (h / 6.0) * (k1 + 2 * k2 + 2 * k3 + k4)
 
 
 def _step_dt(state: jnp.ndarray, tau_cmd: jnp.ndarray,
-             p: SatParams, h: float, substeps: int):
-    """Advance state by one output dt = substeps * h."""
+             p: SatParams, h: float, substeps: int,
+             tau_ext: jnp.ndarray | None = None):
     def substep(s, _):
-        return rk4_step(s, tau_cmd, p, h), None
+        return rk4_step(s, tau_cmd, p, h, tau_ext), None
     new_state, _ = lax.scan(substep, state, None, length=substeps)
     return new_state
 

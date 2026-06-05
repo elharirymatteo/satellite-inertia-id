@@ -1,5 +1,39 @@
 # F1 — known issues and gaps from the retrained full-tensor DR policy
 
+## 2026-06-05 update — F3 disturbance lands, headline plot
+
+`sim/dynamics_jax.py` now threads an external body-torque `tau_ext` through
+the dynamics chain. `T1EnvEKFConfig` gains `disturbance_scale`; the env
+samples `tau_ext ~ Normal(0, disturbance_scale^2 * I_3)` per episode and
+holds it constant. Training, MPC-baseline, and unified-eval scripts set
+`disturbance_scale = 0.1 * tau_max`. The EKF does NOT model the
+disturbance — it's the noise the active-sensing policy must cope with.
+
+**Headline 16-seed eval with disturbance enabled:**
+
+| Sat | RL DR | MPC RH | MPC 1-shot | sine | chirp | PRBS | multi-step |
+|---|---|---|---|---|---|---|---|
+| sat1 | 108% | 282% | 583% | **81%** | 370% | 636% | 418% |
+| sat2 | **11.4%** | 61% | 48% | 62% | 22% | 18% | 19% |
+| sat3 | 10.9% | 29% | 21% | 38% | 16% | 17% | **6.7%** |
+
+`ms/step`: RL/scripted ~0.25, MPC 1-shot ~14, MPC RH ~67.
+
+Paper story:
+- **Active-sensing RL wins on sat2** by a comfortable margin (1.5× over PRBS).
+- **RL is competitive on sat3** (2nd to multi-step's 6.7%, but beats every
+  other active-sensing method).
+- **Dual-MPC degrades catastrophically** under disturbance because it plans
+  against the EKF's belief, which doesn't include the disturbance — a
+  clean illustration that *model-based active sensing fails under model
+  mismatch where the RL policy adapts*.
+- **Compute headline preserved**: 0.25 ms (RL) vs 67 ms (MPC RH), ~270×.
+- **sat1 still hard**: the CubeSat-scale + small-inertia + disturbance
+  combination defeats every method. Documented as out-of-scope for this
+  paper.
+
+
+
 ## 2026-06-05 update — sat1 fix landed
 
 Four changes, in order of decreasing impact:

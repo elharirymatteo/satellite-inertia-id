@@ -43,6 +43,11 @@ class T1EnvEKFConfig(NamedTuple):
     # Reward mode: "info_gain" (D-optimal info gain on posterior cov) or
     # "neg_rel_err" (negative squared relative I-estimation error vs ground truth)
     reward_mode: str = "info_gain"
+    # Body-frame external torque disturbance scale (Nm). Sampled per episode
+    # as N(0, disturbance_scale^2 * I_3); held constant within an episode.
+    # The EKF doesn't model it — it's the noise the active-sensing policy
+    # must cope with. Default 0.0 reproduces the noiseless setup.
+    disturbance_scale: float = 0.0
 
 
 class T1EnvEKFState(NamedTuple):
@@ -53,6 +58,7 @@ class T1EnvEKFState(NamedTuple):
     last_omega_true: jnp.ndarray  # (3,) for the oracle FIM finite-diff
     sat: SatParams
     key: jax.Array
+    tau_ext: jnp.ndarray       # (3,) per-episode body-torque disturbance
 
 
 class T1EnvEKF:
@@ -82,10 +88,11 @@ class T1EnvEKF:
 
     def reset(self, key, sat: SatParams | None = None):
         sat = sat if sat is not None else self.cfg.sat
-        k_omega, k_used = jax.random.split(key, 2)
+        k_omega, k_dist, k_used = jax.random.split(key, 3)
         omega0 = self.cfg.init_omega_scale * jax.random.normal(k_omega, (3,))
         rw0 = jnp.zeros(3)
         sat_state = jnp.concatenate([omega0, rw0])
+        tau_ext = self.cfg.disturbance_scale * jax.random.normal(k_dist, (3,))
 
         diag_true = jnp.diag(sat.I_sat)
         I_diag_init = self.cfg.I0_scale * diag_true  # biased initial diagonal
@@ -105,6 +112,7 @@ class T1EnvEKF:
         env_state = T1EnvEKFState(
             sat_state=sat_state, ekf=ekf_state, F_oracle=jnp.zeros((6, 6)),
             step=jnp.int32(0), last_omega_true=omega0, sat=sat, key=k_used,
+            tau_ext=tau_ext,
         )
         return env_state, self._obs(env_state)
 
@@ -113,9 +121,10 @@ class T1EnvEKF:
         sat = env_state.sat
         tau_cmd = jnp.clip(action, -cfg.tau_max, cfg.tau_max)
 
-        # Advance true dynamics
+        # Advance true dynamics (with episode-constant body-torque disturbance)
         h = cfg.dt / cfg.substeps
-        new_sat_state = _step_dt(env_state.sat_state, tau_cmd, sat, h, cfg.substeps)
+        new_sat_state = _step_dt(env_state.sat_state, tau_cmd, sat, h, cfg.substeps,
+                                 tau_ext=env_state.tau_ext)
         new_omega_true = new_sat_state[0:3]
         new_rw_true = new_sat_state[3:6]
 
@@ -160,7 +169,7 @@ class T1EnvEKF:
         new_state = T1EnvEKFState(
             sat_state=new_sat_state, ekf=new_ekf, F_oracle=new_F_oracle,
             step=next_step, last_omega_true=new_omega_true,
-            sat=sat, key=k_next2,
+            sat=sat, key=k_next2, tau_ext=env_state.tau_ext,
         )
         obs = self._obs(new_state)
         info = {

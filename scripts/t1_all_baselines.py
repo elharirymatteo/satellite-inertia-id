@@ -138,6 +138,41 @@ def _cell_main(cfg_name: str, method: str, seeds: int) -> None:
             wall = time.perf_counter() - t0
             errs.append(_rel_err(_ekf_inertia_matrix(st.ekf.x)))
             walls.append(wall / horizon * 1000)
+    elif method == "PPO":
+        from rl import ppo
+        ppo_path = ROOT / "rl" / "trained_ppo_policy.npz"
+        loaded = dict(np.load(ppo_path))
+        # Unflatten {actor_*, critic_*, log_std} back into ppo's param dict.
+        ppo_params = {"actor": {}, "critic": {}, "log_std": jnp.asarray(loaded["log_std"])}
+        for k, v in loaded.items():
+            if k.startswith("actor_"):
+                ppo_params["actor"][k[len("actor_"):]] = jnp.asarray(v)
+            elif k.startswith("critic_"):
+                ppo_params["critic"][k[len("critic_"):]] = jnp.asarray(v)
+        tau_max = float(env_cfg.tau_max)
+        horizon = int(env_cfg.horizon)
+
+        def ppo_rollout(key):
+            state, obs = env.reset(key, sat=sat)
+            def body(carry, _):
+                st, o = carry
+                a = jnp.clip(ppo.actor_mean(ppo_params, o), -tau_max, tau_max)
+                st2, o2, _r, _d, _i = env.step(st, a)
+                return (st2, o2), None
+            (final_state, _), _ = jax.lax.scan(
+                body, (state, obs), None, length=horizon)
+            return final_state
+        ppo_rollout = jax.jit(ppo_rollout)
+
+        errs, walls = [], []
+        for s in range(seeds):
+            key = jax.random.PRNGKey(1000 + s)
+            t0 = time.perf_counter()
+            st = ppo_rollout(key)
+            st.ekf.x.block_until_ready()
+            wall = time.perf_counter() - t0
+            errs.append(_rel_err(_ekf_inertia_matrix(st.ekf.x)))
+            walls.append(wall / horizon * 1000)
     elif method == "dual-MPC_RH":
         errs, walls = [], []
         for s in range(seeds):
@@ -192,7 +227,7 @@ def main():
     # Lazy import numpy in the orchestrator only after avoiding JAX.
     import numpy as np
 
-    methods = ["RL_DR", "dual-MPC_RH", "dual-MPC_oneshot",
+    methods = ["RL_DR", "PPO", "dual-MPC_RH", "dual-MPC_oneshot",
                "sine", "chirp", "prbs", "multi step"]
     rows = []
     print(f"{'sat':>14}  {'method':>20}  {'mean_rel_err':>14}  "

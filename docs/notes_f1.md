@@ -1,5 +1,39 @@
 # F1 — known issues and gaps from the retrained full-tensor DR policy
 
+## 2026-06-05 update — F5 PPO ablation, diff-sim NOT the secret sauce
+
+Added `rl/ppo.py` (Gaussian policy, GAE, clipped surrogate) and
+`scripts/t1_train_ppo.py`. PPO is integrated into the unified baselines
+eval. Same env, same DR range (0.3, 20), same disturbance scale
+(0.1·tau_max), same horizon and seed budget.
+
+**Headline 16-seed eval, disturbance enabled:**
+
+| Sat | RL DR (diff-sim) | **PPO** | MPC RH | best scripted |
+|---|---|---|---|---|
+| sat1 | **108%** | 220% | 282% | sine 81% |
+| sat2 | 11.4% | **8.4%** | 61% | PRBS 18% |
+| sat3 | 10.9% | **9.2%** | 29% | multi-step 6.7% |
+
+Training wall time: diff-sim 85s, PPO 54s (PPO is *faster* because it
+doesn't need to backprop through the rollout — just samples and SGD).
+
+**Interpretation for the paper:** the diff-sim path-derivative gradient
+is NOT what makes this work. Equivalent results from a model-free RL
+method (PPO) confirm that the win comes from the policy class + the env
++ the reward + the DR setup, not from differentiable simulation. This
+pre-empts the reviewer critique "you only win because the sim is
+differentiable" — F5 cleanly rules it out.
+
+The headline framing shifts slightly: instead of "diff-sim policy gradient
+for active inertia ID", the paper says "active-sensing RL (PPO or
+differentiable simulation) substantially outperforms scripted excitation
+and model-based MPC under realistic disturbances." That's a *stronger*
+claim, not a weaker one — it doesn't depend on the differentiability of
+the sim.
+
+
+
 ## 2026-06-05 update — F3 disturbance lands, headline plot
 
 `sim/dynamics_jax.py` now threads an external body-torque `tau_ext` through

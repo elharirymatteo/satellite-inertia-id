@@ -27,18 +27,22 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def _run_cell(cfg_name: str, method: str, seeds: int) -> dict:
+def _run_cell(cfg_name: str, method: str, seeds: int,
+              disturbance_mode: str = "constant") -> dict:
     """Spawn a fresh Python subprocess to run one (sat, method) cell.
 
-    The subprocess invokes this same script with --cell mode; results are
-    parsed from a single JSON line printed at the end of its stdout.
+    Disturbance mode is passed through env var (the cell's CLI surface
+    stays narrow). Default "constant" reproduces F3.
     """
+    import os
     cmd = [
         sys.executable, "-u", str(Path(__file__).resolve()),
         "--cell", "--cfg-name", cfg_name, "--method", method,
         "--seeds", str(seeds),
     ]
-    proc = subprocess.run(cmd, cwd=str(ROOT), capture_output=True, text=True)
+    env = {**os.environ, "T1_DISTURBANCE_MODE": disturbance_mode}
+    proc = subprocess.run(cmd, cwd=str(ROOT), capture_output=True, text=True,
+                          env=env)
     if proc.returncode != 0:
         sys.stderr.write(
             f"\n[cell {cfg_name} / {method}] subprocess failed "
@@ -80,6 +84,11 @@ def _cell_main(cfg_name: str, method: str, seeds: int) -> None:
     with open(ROOT / "config_sat1.yaml") as f:
         cfg_y = yaml.safe_load(f)
     tau_max = float(cfg_y["reaction_wheels"]["max_torque"])
+    # Disturbance mode is read from an env var so the parent orchestrator
+    # can pass it through to each subprocess cell without changing the
+    # cell's CLI surface.
+    import os
+    disturbance_mode = os.environ.get("T1_DISTURBANCE_MODE", "constant")
     base = T1EnvEKFConfig(
         sat=_load_sat("config_sat1.yaml"),
         dt=float(cfg_y["sim"]["dt"]), substeps=10, horizon=150,
@@ -90,6 +99,7 @@ def _cell_main(cfg_name: str, method: str, seeds: int) -> None:
         Qc_omega=1e-9, Qc_I_rel=1e-7, Qc_rw=1e-9,
         reward_mode="neg_rel_err",
         disturbance_scale=0.1 * tau_max,
+        disturbance_mode=disturbance_mode,
     )
 
     sat = _load_sat(cfg_name)
@@ -218,6 +228,10 @@ def main():
                          "print JSON on stdout for the parent.")
     ap.add_argument("--cfg-name", type=str, default=None)
     ap.add_argument("--method", type=str, default=None)
+    ap.add_argument("--disturbance-mode", type=str, default="constant",
+                    choices=["constant", "sinusoidal"],
+                    help="F4 sim-to-sim test: 'sinusoidal' uses a time-varying"
+                         " disturbance the augmented EKF was not trained for.")
     args = ap.parse_args()
 
     if args.cell:
@@ -230,11 +244,12 @@ def main():
     methods = ["RL_DR", "PPO", "dual-MPC_RH", "dual-MPC_oneshot",
                "sine", "chirp", "prbs", "multi step"]
     rows = []
+    print(f"disturbance_mode = {args.disturbance_mode}", flush=True)
     print(f"{'sat':>14}  {'method':>20}  {'mean_rel_err':>14}  "
           f"{'std':>10}  {'ms/step':>10}", flush=True)
     for cfg_name in ["config_sat1.yaml", "config_sat2.yaml", "config_sat3.yaml"]:
         for m in methods:
-            result = _run_cell(cfg_name, m, args.seeds)
+            result = _run_cell(cfg_name, m, args.seeds, args.disturbance_mode)
             errs_arr = np.asarray(result["errs"], dtype=float)
             walls_arr = np.asarray(result["walls"], dtype=float)
             if np.all(np.isnan(errs_arr)):

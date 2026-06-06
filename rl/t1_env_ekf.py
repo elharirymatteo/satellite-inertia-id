@@ -44,10 +44,18 @@ class T1EnvEKFConfig(NamedTuple):
     # "neg_rel_err" (negative squared relative I-estimation error vs ground truth)
     reward_mode: str = "info_gain"
     # Body-frame external torque disturbance scale (Nm). Sampled per episode
-    # as N(0, disturbance_scale^2 * I_3); held constant within an episode.
-    # The EKF doesn't model it — it's the noise the active-sensing policy
-    # must cope with. Default 0.0 reproduces the noiseless setup.
+    # as N(0, disturbance_scale^2 * I_3). The EKF augments tau_ext into its
+    # state to estimate it. Default 0.0 reproduces the noiseless setup.
     disturbance_scale: float = 0.0
+    # Disturbance mode: "constant" (default, episode-fixed bias matching what
+    # the augmented EKF expects) or "sinusoidal" (time-varying amplitude
+    # * cos(omega*t + phase), with omega ~ U(omega_lo, omega_hi) and
+    # phase ~ U(0, 2π) per episode). Sinusoidal is the F4 sim-to-sim test:
+    # constant-trained policies / constant-prior EKF face a structure they
+    # never saw during training.
+    disturbance_mode: str = "constant"
+    disturbance_omega_lo: float = 0.05
+    disturbance_omega_hi: float = 0.5
 
 
 class T1EnvEKFState(NamedTuple):
@@ -58,7 +66,9 @@ class T1EnvEKFState(NamedTuple):
     last_omega_true: jnp.ndarray  # (3,) for the oracle FIM finite-diff
     sat: SatParams
     key: jax.Array
-    tau_ext: jnp.ndarray       # (3,) per-episode body-torque disturbance
+    tau_ext: jnp.ndarray       # (3,) constant amplitude / bias
+    dist_omega: jnp.ndarray    # (3,) per-axis angular freq (0 for constant mode)
+    dist_phase: jnp.ndarray    # (3,) per-axis phase
 
 
 class T1EnvEKF:
@@ -93,11 +103,22 @@ class T1EnvEKF:
 
     def reset(self, key, sat: SatParams | None = None):
         sat = sat if sat is not None else self.cfg.sat
-        k_omega, k_dist, k_used = jax.random.split(key, 3)
+        k_omega, k_dist, k_om, k_ph, k_used = jax.random.split(key, 5)
         omega0 = self.cfg.init_omega_scale * jax.random.normal(k_omega, (3,))
         rw0 = jnp.zeros(3)
         sat_state = jnp.concatenate([omega0, rw0])
         tau_ext = self.cfg.disturbance_scale * jax.random.normal(k_dist, (3,))
+        if self.cfg.disturbance_mode == "sinusoidal":
+            dist_omega = jax.random.uniform(
+                k_om, (3,),
+                minval=self.cfg.disturbance_omega_lo,
+                maxval=self.cfg.disturbance_omega_hi,
+            )
+            dist_phase = jax.random.uniform(k_ph, (3,), minval=0.0,
+                                            maxval=2.0 * jnp.pi)
+        else:
+            dist_omega = jnp.zeros(3)
+            dist_phase = jnp.zeros(3)
 
         diag_true = jnp.diag(sat.I_sat)
         I_diag_init = self.cfg.I0_scale * diag_true  # biased initial diagonal
@@ -122,7 +143,7 @@ class T1EnvEKF:
         env_state = T1EnvEKFState(
             sat_state=sat_state, ekf=ekf_state, F_oracle=jnp.zeros((6, 6)),
             step=jnp.int32(0), last_omega_true=omega0, sat=sat, key=k_used,
-            tau_ext=tau_ext,
+            tau_ext=tau_ext, dist_omega=dist_omega, dist_phase=dist_phase,
         )
         return env_state, self._obs(env_state)
 
@@ -131,10 +152,16 @@ class T1EnvEKF:
         sat = env_state.sat
         tau_cmd = jnp.clip(action, -cfg.tau_max, cfg.tau_max)
 
-        # Advance true dynamics (with episode-constant body-torque disturbance)
+        # Disturbance value at this step: constant or sinusoidal depending on
+        # cfg.disturbance_mode. For "constant" mode dist_omega=0 so the cosine
+        # term is just 1, falling through to env_state.tau_ext * 1.
+        t = env_state.step.astype(jnp.float32) * cfg.dt
+        tau_ext_now = env_state.tau_ext * jnp.cos(
+            env_state.dist_omega * t + env_state.dist_phase
+        )
         h = cfg.dt / cfg.substeps
         new_sat_state = _step_dt(env_state.sat_state, tau_cmd, sat, h, cfg.substeps,
-                                 tau_ext=env_state.tau_ext)
+                                 tau_ext=tau_ext_now)
         new_omega_true = new_sat_state[0:3]
         new_rw_true = new_sat_state[3:6]
 
@@ -177,6 +204,7 @@ class T1EnvEKF:
             sat_state=new_sat_state, ekf=new_ekf, F_oracle=new_F_oracle,
             step=next_step, last_omega_true=new_omega_true,
             sat=sat, key=k_next2, tau_ext=env_state.tau_ext,
+            dist_omega=env_state.dist_omega, dist_phase=env_state.dist_phase,
         )
         obs = self._obs(new_state)
         info = {

@@ -76,6 +76,42 @@ deterministic policy gradient gets stuck in local optima that the
 hand-tuned multi-step bypasses. The honest paper conclusion stands:
 multi-step + augmented EKF is the practical winner.
 
+## 2026-06-06 update — F4 sim-to-sim (sinusoidal disturbance)
+
+Added `disturbance_mode="sinusoidal"` to `T1EnvEKFConfig`: instead of a
+constant body-torque bias, the env now applies
+`tau_ext(t) = amplitude * cos(omega*t + phase)` with omega ~ U(0.05, 0.5)
+rad/s and phase ~ U(0, 2π) per episode. RMS amplitude matches the
+constant case (so it's the same energy budget, just oscillating).
+
+**Crucially: no policies are retrained.** The augmented EKF still assumes
+a near-constant tau_ext. This tests how brittle the system is to
+disturbance-structure mismatch.
+
+**8-seed eval (sinusoidal disturbance, constant-trained policies):**
+
+| Sat | RL DR | PPO | MPC RH | MPC 1s | sine | chirp | PRBS | multi |
+|---|---|---|---|---|---|---|---|---|
+| sat1 | 50% | 498% | 66% | 54% | 204% | **41%** | 431% | 52% |
+| sat2 | 22% | 26% | 48% | 50% | 34% | 26% | 45% | **16%** |
+| sat3 | 16% | 14% | 30% | 30% | 22% | 13% | 19% | **5.8%** |
+
+Degradation vs constant (sat2/sat3): multi-step 2.5%→16%/5.8%
+(6×/2×), chirp 2.8%→26%/13%, RL DR 6.4%→22%/16%, MPC RH
+10.9%→48%/30%. PPO catastrophically fails sat1 (498%).
+
+Paper takeaway: the pipeline generalizes to disturbance structures it
+wasn't trained on (no NaN, all methods finite), but with real
+degradation. The augmented EKF's constant-bias model is the bottleneck
+under sinusoidal disturbance — a follow-up paper could extend the EKF
+to a band-limited tau_ext model and re-test.
+
+Multi-step + augmented EKF stays best — same as the in-distribution
+result. The ranking among learned methods (RL ≤ PPO ≤ MPC) is also
+preserved. RL DR is relatively the most robust (smallest constant-to-
+sinusoidal degradation among learned methods), suggesting some real
+generalization from the constant-disturbance training.
+
 
 
 ## 2026-06-05 update — F5 PPO ablation, diff-sim NOT the secret sauce

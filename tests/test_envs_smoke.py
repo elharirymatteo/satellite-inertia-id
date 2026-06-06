@@ -42,7 +42,7 @@ def test_t1env_obs_shape_28():
     assert jnp.isfinite(r)
 
 
-def test_t1envekf_obs_shape_19():
+def test_t1envekf_obs_shape_25():
     sat = _toy_sat()
     cfg = T1EnvEKFConfig(
         sat=sat, dt=0.1, substeps=10, horizon=20, tau_max=0.01,
@@ -51,13 +51,14 @@ def test_t1envekf_obs_shape_19():
         I0_scale=0.85, sigma_I0_rel=0.30,
         Qc_omega=1e-9, Qc_I_rel=1e-7, Qc_rw=1e-9,
         reward_mode="info_gain",
+        disturbance_scale=0.001,
     )
     env = make_env_ekf(cfg)
-    assert env.obs_shape == (19,)
+    assert env.obs_shape == (25,)
     state, obs = env.reset(jax.random.PRNGKey(2))
-    assert obs.shape == (19,)
-    assert state.ekf.x.shape == (12,)
-    assert state.ekf.P.shape == (12, 12)
+    assert obs.shape == (25,)
+    assert state.ekf.x.shape == (15,)
+    assert state.ekf.P.shape == (15, 15)
     state, obs, r, done, info = env.step(state, jnp.array([0.001, 0.0, 0.0]))
-    assert obs.shape == (19,)
+    assert obs.shape == (25,)
     assert jnp.isfinite(r)

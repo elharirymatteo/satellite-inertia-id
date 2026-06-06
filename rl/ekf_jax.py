@@ -1,16 +1,17 @@
-"""JAX port of the EKF, generalized to the full 6-parameter inertia tensor.
+"""JAX EKF, augmented to jointly estimate inertia + external body torque.
 
-State: x = [omega(3), I_diag(3), I_offdiag(3), rw(3)]   (12-dim)
+State: x = [omega(3), I_diag(3), I_offdiag(3), rw(3), tau_ext(3)]   (15-dim)
   x[0:3]   = omega                       (angular velocity)
   x[3:6]   = (Ixx, Iyy, Izz)             (inertia diagonal)
   x[6:9]   = (Ixy, Ixz, Iyz)             (inertia off-diagonal)
   x[9:12]  = Omega_rw                    (reaction wheel speeds)
+  x[12:15] = tau_ext                     (body-frame disturbance, near-constant)
 Measurement: z = [omega_meas(3), rw_meas(3)]            (6-dim, H linear)
 
-Pure-functional, jittable, vmappable. The Jacobian is taken via `jax.jacobian`
-on the discrete update map (closed-form via AD); the update uses Joseph form
-and the inertia mean is guarded against drifting non-PSD by a lazy eigval-clip
-projection.
+The tau_ext augmentation lets the EKF attribute persistent omega innovations
+to an unmodeled torque rather than to inertia error. Without it, the two
+are observationally indistinguishable and the inertia estimate diverges
+under any disturbance.
 """
 from __future__ import annotations
 from typing import NamedTuple
@@ -19,6 +20,7 @@ import jax.numpy as jnp
 
 
 I_DIAG_FLOOR = 1e-6
+STATE_DIM = 15
 
 
 def _skew(v):
@@ -30,13 +32,7 @@ def _skew(v):
 
 
 def inertia_from_state(x):
-    """Build the 3x3 symmetric I from the EKF state vector x[3:9].
-
-    Public helper: the EKF state's inertia block uses the convention
-    x[3:6] = (Ixx, Iyy, Izz) and x[6:9] = (Ixy, Ixz, Iyz). Returning the
-    matrix form is needed by the env (reward), the MPC driver (planning
-    against the EKF mean), and the unified eval (Frobenius rel_err).
-    """
+    """Build the 3x3 symmetric I from EKF state x[3:9]."""
     Ixx, Iyy, Izz = x[3], x[4], x[5]
     Ixy, Ixz, Iyz = x[6], x[7], x[8]
     return jnp.array([
@@ -46,8 +42,12 @@ def inertia_from_state(x):
     ])
 
 
-# Alias for callers inside this module that used the underscored name.
 _inertia_from_state = inertia_from_state
+
+
+def tau_ext_from_state(x):
+    """Read the EKF's estimate of the body-torque disturbance from x[12:15]."""
+    return x[12:15]
 
 
 def _floor_I_diag(x):
@@ -93,39 +93,33 @@ def _project_psd_if_needed(x):
 class EKFParams(NamedTuple):
     dt: float
     I_rw: jnp.ndarray         # (3,) wheel inertia per axis
-    Qc: jnp.ndarray           # (12,) continuous-time process-noise diagonal
+    Qc: jnp.ndarray           # (15,) continuous-time process-noise diagonal
     R: jnp.ndarray            # (6,) measurement-noise diagonal
 
 
 class EKFState(NamedTuple):
-    x: jnp.ndarray   # (12,)
-    P: jnp.ndarray   # (12, 12)
+    x: jnp.ndarray   # (15,)
+    P: jnp.ndarray   # (15, 15)
 
 
 def _H_matrix():
     """Linear measurement matrix: z = H x where z = [omega, rw_speed]."""
-    H = jnp.zeros((6, 12))
-    H = H.at[0:3, 0:3].set(jnp.eye(3))    # omega measurement
-    H = H.at[3:6, 9:12].set(jnp.eye(3))   # rw_speed measurement
+    H = jnp.zeros((6, STATE_DIM))
+    H = H.at[0:3, 0:3].set(jnp.eye(3))     # omega
+    H = H.at[3:6, 9:12].set(jnp.eye(3))    # rw_speed
     return H
 
 
 _H = _H_matrix()
 
 
-def f(x, u, params: EKFParams, tau_ext=None):
-    """Continuous-time state derivative xdot = f(x, u).
-
-    omega_dot = I^{-1} ( tau_ext - I_rw * u - omega x (I omega + I_rw * rw) )
-    I_dot     = 0    (inertia is a constant unknown — random walk via Q)
-    rw_dot    = u    (control is wheel acceleration command)
-    """
+def f(x, u, params: EKFParams):
+    """xdot = f(x, u). tau_ext is read from the augmented state x[12:15]."""
     omega = x[0:3]
     I = _inertia_from_state(x)
     rw = x[9:12]
+    tau_ext = tau_ext_from_state(x)
     Irw = params.I_rw
-    if tau_ext is None:
-        tau_ext = jnp.zeros(3)
     M = I @ omega + Irw * rw
     h_rw_dot = Irw * u
     tau_rw = -h_rw_dot
@@ -133,8 +127,9 @@ def f(x, u, params: EKFParams, tau_ext=None):
     omega_dot = jnp.linalg.solve(I, rhs)
     return jnp.concatenate([
         omega_dot,
-        jnp.zeros(6),   # I_diag, I_offdiag derivatives are zero
-        u,
+        jnp.zeros(6),      # I_diag, I_offdiag derivatives are zero
+        u,                  # rw_dot
+        jnp.zeros(3),      # tau_ext_dot = 0 (constant bias prior)
     ])
 
 
@@ -142,23 +137,23 @@ def f(x, u, params: EKFParams, tau_ext=None):
 EKF_PREDICT_SUBSTEPS = 5
 
 
-def _predict_mean(x, u, params: EKFParams, tau_ext, n_substeps: int):
+def _predict_mean(x, u, params: EKFParams, n_substeps: int):
     h = params.dt / n_substeps
     def body(xx, _):
-        return xx + h * f(xx, u, params, tau_ext), None
+        return xx + h * f(xx, u, params), None
     new_x, _ = jax.lax.scan(body, x, None, length=n_substeps)
     return new_x
 
 
-def analytic_F(x, u, params: EKFParams, tau_ext=None):
+def analytic_F(x, u, params: EKFParams):
     return jax.jacobian(
-        lambda xx: _predict_mean(xx, u, params, tau_ext, EKF_PREDICT_SUBSTEPS)
+        lambda xx: _predict_mean(xx, u, params, EKF_PREDICT_SUBSTEPS)
     )(x)
 
 
-def predict(state: EKFState, u, params: EKFParams, tau_ext=None) -> EKFState:
-    x_pred = _predict_mean(state.x, u, params, tau_ext, EKF_PREDICT_SUBSTEPS)
-    F = analytic_F(state.x, u, params, tau_ext)
+def predict(state: EKFState, u, params: EKFParams) -> EKFState:
+    x_pred = _predict_mean(state.x, u, params, EKF_PREDICT_SUBSTEPS)
+    F = analytic_F(state.x, u, params)
     Qd = jnp.diag(params.Qc * params.dt)
     P_pred = F @ state.P @ F.T + Qd
     P_pred = 0.5 * (P_pred + P_pred.T)
@@ -171,28 +166,23 @@ def update(state: EKFState, z, params: EKFParams) -> EKFState:
     R = jnp.diag(params.R)
     z_pred = _H @ state.x
     S = _H @ state.P @ _H.T + R
-    # Solve K = P H^T S^{-1} via linear solve for numerical stability.
-    K = jnp.linalg.solve(S.T, _H @ state.P.T).T  # (12, 6)
+    K = jnp.linalg.solve(S.T, _H @ state.P.T).T  # (15, 6)
     x_new = state.x + K @ (z - z_pred)
     x_new = _floor_I_diag(x_new)
     x_new = _project_psd_if_needed(x_new)
-    # Joseph form keeps P PSD even with non-optimal K.
-    I_KH = jnp.eye(12) - K @ _H
+    I_KH = jnp.eye(STATE_DIM) - K @ _H
     P_new = I_KH @ state.P @ I_KH.T + K @ R @ K.T
     P_new = 0.5 * (P_new + P_new.T)
     return EKFState(x=x_new, P=P_new)
 
 
-def step(state: EKFState, u, z, params: EKFParams, tau_ext=None):
-    """One predict + update step. Returns (new_state, inertia_info_gain).
+def step(state: EKFState, u, z, params: EKFParams):
+    """One predict + update. Returns (new_state, inertia_info_gain).
 
-    inertia_info_gain = log-det(P_pred[3:9, 3:9]) - log-det(P_post[3:9, 3:9])
-    Aggregated over measurement updates, this is non-negative in expectation.
+    inertia_info_gain = log-det(P_pred[3:9, 3:9]) - log-det(P_post[3:9, 3:9]).
     """
-    state_pred = predict(state, u, params, tau_ext)
+    state_pred = predict(state, u, params)
     state_post = update(state_pred, z, params)
-
-    # Log-det of the inertia 6x6 block via Cholesky (stable backward).
     eps_I = 1e-12 * jnp.eye(6)
     L_pred = jnp.linalg.cholesky(state_pred.P[3:9, 3:9] + eps_I)
     L_post = jnp.linalg.cholesky(state_post.P[3:9, 3:9] + eps_I)

@@ -66,11 +66,15 @@ class T1EnvEKF:
     def __init__(self, cfg: T1EnvEKFConfig):
         self.cfg = cfg
         # Observation: ω_est(3) + rw_est(3)/rw_max + EKF I-estimate(6, normalized)
-        #              + log of inertia-block cov diagonal(6) + progress(1) = 19-dim
-        self.obs_shape = (19,)
+        #              + log diag(P_I) (6) + tau_ext_est(3) + log diag(P_tau)(3)
+        #              + progress(1) = 25-dim
+        self.obs_shape = (25,)
 
     def _build_ekf_params(self, sat: SatParams) -> EKFParams:
         diag_I = jnp.diag(sat.I_sat)
+        # Process noise for tau_ext: very small (bias is near-constant); use
+        # 1% of the disturbance scale as the random-walk std per dt.
+        dist_scale = jnp.maximum(self.cfg.disturbance_scale, 1e-9)
         return EKFParams(
             dt=self.cfg.dt,
             I_rw=jnp.full((3,), sat.I_rw),
@@ -79,6 +83,7 @@ class T1EnvEKF:
                 self.cfg.Qc_I_rel * diag_I ** 2,                            # I_diag
                 jnp.full((3,), self.cfg.Qc_I_rel * (diag_I.mean()) ** 2),   # I_off
                 jnp.full((3,), self.cfg.Qc_rw),                             # rw
+                jnp.full((3,), (0.01 * dist_scale) ** 2),                   # tau_ext
             ]),
             R=jnp.concatenate([
                 jnp.full((3,), self.cfg.sigma_omega ** 2),
@@ -100,12 +105,17 @@ class T1EnvEKF:
         # Off-diag prior 6x tighter than diag: real spacecraft have small
         # off-diagonals; loose prior here lets the Kalman update over-correct.
         sigma_I_off = jnp.full((3,), 0.05 * diag_true.mean())
-        x0 = jnp.concatenate([omega0, I_diag_init, jnp.zeros(3), rw0])
+        # tau_ext prior: mean 0 (matches reset sampling), variance matches
+        # the env's actual sampling distribution.
+        sigma_tau_ext = jnp.full((3,), jnp.maximum(self.cfg.disturbance_scale, 1e-9))
+        x0 = jnp.concatenate([omega0, I_diag_init, jnp.zeros(3), rw0,
+                              jnp.zeros(3)])
         P0 = jnp.diag(jnp.concatenate([
             jnp.full((3,), 1e-4),
             sigma_I_diag ** 2,
             sigma_I_off ** 2,
             jnp.full((3,), 1e-2),
+            sigma_tau_ext ** 2,
         ]))
         ekf_state = EKFState(x=x0, P=P0)
 
@@ -136,9 +146,6 @@ class T1EnvEKF:
         z = jnp.concatenate([new_omega_true + noise_omega,
                              new_rw_true + noise_rw])
 
-        # EKF step: needs u (rw acceleration command) — approximate via tau_cmd / I_rw
-        # since the true RW limits may have changed the actual acceleration; the
-        # EKF doesn't know that, so it uses the commanded value (realistic).
         u_ekf = tau_cmd / sat.I_rw
         ekf_params = self._build_ekf_params(sat)
         new_ekf, info_gain = ekf_step(env_state.ekf, u_ekf, z, ekf_params)
@@ -184,19 +191,14 @@ class T1EnvEKF:
 
     def _obs(self, env_state: T1EnvEKFState) -> jnp.ndarray:
         ekf = env_state.ekf
-        # Observed (noisy) state from EKF — use the EKF's filtered estimate of ω.
-        # (The agent never sees true ω directly under this env.)
         omega_est = ekf.x[0:3]
         I_diag = ekf.x[3:6]
         I_off = ekf.x[6:9]
         rw_est = ekf.x[9:12]
+        tau_ext_est = ekf.x[12:15]
         I_est = jnp.concatenate([I_diag, I_off])
-        # Diagonal of the 6x6 inertia-block covariance, log-scaled.
         P_I_diag = jnp.diag(ekf.P[3:9, 3:9])
-        # Normalize: I_est by a fixed reference built from cfg.sat so the policy
-        # sees a roughly O(1) signal across very different sats. Off-diagonal
-        # reference is bounded below to keep the normalization stable when the
-        # nominal off-diagonals are near zero.
+        P_tau_diag = jnp.diag(ekf.P[12:15, 12:15])
         ref_I3 = jnp.diag(self.cfg.sat.I_sat)
         ref_off = jnp.array([self.cfg.sat.I_sat[0, 1],
                              self.cfg.sat.I_sat[0, 2],
@@ -205,12 +207,15 @@ class T1EnvEKF:
             ref_I3,
             jnp.maximum(jnp.abs(ref_off), 0.01 * ref_I3.mean()),
         ])
+        tau_ref = jnp.maximum(self.cfg.disturbance_scale, self.cfg.tau_max * 1e-3)
         progress = env_state.step.astype(jnp.float32) / self.cfg.horizon
         return jnp.concatenate([
             omega_est,
             rw_est / self.cfg.sat.rw_speed_max,
             I_est / ref_norm,
             jnp.log(jnp.maximum(P_I_diag, 1e-30)),
+            tau_ext_est / tau_ref,
+            jnp.log(jnp.maximum(P_tau_diag, 1e-30)),
             jnp.array([progress]),
         ])
 

@@ -1,5 +1,59 @@
 # F1 — known issues and gaps from the retrained full-tensor DR policy
 
+## 2026-06-06 update — augmented EKF resolves sat1, rewrites the story
+
+The EKF state grows from 12 to 15 dims: `[ω, I_diag, I_off, Ω_rw, tau_ext]`.
+The augmentation lets the filter estimate the disturbance jointly with
+inertia. The observation grows to 25 dims (added: tau_ext estimate +
+log diag of its covariance).
+
+**Headline unified eval (16 seeds, disturbance enabled, augmented EKF):**
+
+| Sat | RL DR | PPO | MPC RH | MPC 1-shot | sine | chirp | PRBS | multi-step |
+|---|---|---|---|---|---|---|---|---|
+| sat1 | 53% | 1342% | 7.2% | 6.9% | 2.8% | 2.1% | 115% | **1.7%** |
+| sat2 | 6.4% | 6.5% | 10.9% | 11.0% | 3.1% | 2.8% | 10.1% | **2.4%** |
+| sat3 | 6.5% | 7.6% | 10.7% | 10.5% | 4.4% | **2.9%** | 11.3% | 2.7% |
+
+- **sat1 is fixed**: scripted profiles drop from 80-636% (without
+  augmentation) to 1.7-2.8% (with). MPC drops from 282-583% to 6.9-7.2%.
+  PRBS bang-bang is still pathological (115%) but no longer infinite.
+- **Scripted multi-step wins outright** on every sat. The augmented EKF
+  closes the model-mismatch gap that motivated learned active-sensing
+  policies; once the disturbance is observed, the inertia ID problem
+  collapses back to a well-conditioned regression.
+- **RL DR / PPO are now mid-pack**: ~6% on sat2/sat3. Active-sensing
+  policies are competitive but no longer dominate. The PPO sat1 number
+  (1342%) is OOD-failure — sat1 is below the training I_range and the
+  augmented 25-dim observation didn't help PPO generalize.
+- **MPC RH/1-shot are mid-pack too**: ~7-11%. The planner inherits the
+  augmented EKF's tau_ext estimate, but still under-performs hand-tuned
+  multi-step. Compute-wise it's still ~270× more expensive than RL.
+
+### What this means for the paper
+
+The active-sensing claim shifts from "RL is the only thing that works"
+to "augmented EKF + active sensing is the well-engineered pipeline,
+with hand-tuned multi-step as the simple/best concrete excitation."
+That's a stronger paper than the previous framing because the
+contribution is now the *system* (full-tensor ID + augmented EKF +
+saturation-aware MPC + RL ablation) rather than a single algorithm's
+win. The honest narrative:
+
+1. F1: full-tensor ID + DR sampler.
+2. F3: introduces disturbance → scripted methods break, "active sensing
+   matters" claim looks strong.
+3. F5: PPO ablation → diff-sim is NOT the secret sauce.
+4. Augmented EKF: closes the disturbance gap that broke scripted
+   methods → multi-step + augmented EKF is the best practical
+   combination.
+
+The paper recommends: augmented EKF + multi-step for spacecraft inertia
+ID under realistic disturbances. Active-sensing policies are competitive
+but the engineering simplification of multi-step makes it the default.
+
+
+
 ## 2026-06-05 update — F5 PPO ablation, diff-sim NOT the secret sauce
 
 Added `rl/ppo.py` (Gaussian policy, GAE, clipped surrogate) and

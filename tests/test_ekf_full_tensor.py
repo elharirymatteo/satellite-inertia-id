@@ -20,10 +20,11 @@ def _make_params(dt=0.1):
         dt=dt,
         I_rw=jnp.full((3,), 1e-4),
         Qc=jnp.concatenate([
-            jnp.full((3,), 1e-9),  # omega
-            jnp.full((3,), 1e-9),  # I_diag
-            jnp.full((3,), 1e-9),  # I_offdiag
-            jnp.full((3,), 1e-9),  # rw
+            jnp.full((3,), 1e-9),   # omega
+            jnp.full((3,), 1e-9),   # I_diag
+            jnp.full((3,), 1e-9),   # I_offdiag
+            jnp.full((3,), 1e-9),   # rw
+            jnp.full((3,), 1e-12),  # tau_ext (near-static bias)
         ]),
         R=jnp.concatenate([jnp.full((3,), 1e-8), jnp.full((3,), 1e-6)]),
     )
@@ -40,12 +41,14 @@ def test_posterior_stays_psd_over_long_rollout():
         jnp.asarray(I_init_diag),
         jnp.zeros(3),
         jnp.zeros(3),
+        jnp.zeros(3),  # tau_ext
     ])
     P0 = jnp.diag(jnp.concatenate([
         jnp.full((3,), 1e-4),
         (0.30 * jnp.asarray(I_init_diag)) ** 2,
         jnp.full((3,), (0.1 * I_init_diag.mean()) ** 2),
         jnp.full((3,), 1e-2),
+        jnp.full((3,), 1e-8),  # tau_ext prior cov
     ]))
     state = EKFState(x=x0, P=P0)
 
@@ -79,12 +82,14 @@ def test_recovers_full_tensor_from_noisy_data():
     params = _make_params(dt=dt)
 
     I_init_diag = 0.85 * jnp.array([I_true[0, 0], I_true[1, 1], I_true[2, 2]])
-    x0 = jnp.concatenate([jnp.zeros(3), I_init_diag, jnp.zeros(3), jnp.zeros(3)])
+    x0 = jnp.concatenate([jnp.zeros(3), I_init_diag, jnp.zeros(3), jnp.zeros(3),
+                          jnp.zeros(3)])
     P0 = jnp.diag(jnp.concatenate([
         jnp.full((3,), 1e-4),
         (0.30 * I_init_diag) ** 2,
         jnp.full((3,), (0.1 * float(I_init_diag.mean())) ** 2),
         jnp.full((3,), 1e-2),
+        jnp.full((3,), 1e-8),  # tau_ext prior
     ]))
     ekf_state = EKFState(x=x0, P=P0)
 

@@ -52,6 +52,30 @@ The paper recommends: augmented EKF + multi-step for spacecraft inertia
 ID under realistic disturbances. Active-sensing policies are competitive
 but the engineering simplification of multi-step makes it the default.
 
+### RL retraining sweep (2026-06-06)
+
+Tried five variations to see if RL DR could catch the scripted multi-step
+floor (1.7-2.7% rel_err on sat1/2/3). None of them improved over the
+original 500-step / batch-32 / hidden-64 / I_range=(0.3, 20) config:
+
+| Variant | sat1 | sat2 | sat3 |
+|---|---|---|---|
+| **Original (best)** | **61%** | **4.0%** | **5.6%** |
+| 1000 steps | 484% | 4.0% | 6.2% |
+| Batch 64 | NaN | 3.8% | 7.2% |
+| Hidden 128 | 407% | 4.9% | 6.8% |
+| Different seed (7) | 776% | 4.2% | 6.9% |
+| I_range (0.15, 20) | NaN | 5.2% | 7.7% |
+
+Conclusion: the RL ceiling for this problem (with augmented EKF +
+disturbance) is ~4-6% on in-distribution sats, ~60% on the OOD sat1.
+Scripted multi-step's ~2.5% floor is genuinely better. Plausible
+explanations: (1) the policy's smooth tanh-MLP output cannot express
+multi-step's structured discontinuous jumps efficiently; (2) the
+deterministic policy gradient gets stuck in local optima that the
+hand-tuned multi-step bypasses. The honest paper conclusion stands:
+multi-step + augmented EKF is the practical winner.
+
 
 
 ## 2026-06-05 update — F5 PPO ablation, diff-sim NOT the secret sauce

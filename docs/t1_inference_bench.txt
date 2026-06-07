@@ -1,0 +1,6 @@
+method,ms_per_step
+RL DR (deterministic MLP),0.006398169789463282
+PPO (Gaussian mean),0.006647729314863682
+Dual-MPC RH (per-step amortized),1.2842445308342576
+Dual-MPC RH (per-plan call, every 10 steps),12.842445308342576
+Scripted excitation,0.0

@@ -94,7 +94,6 @@ def main():
         ax[0].annotate(n, (l, r * 100), fontsize=6, alpha=0.6)
     ax[0].set_xlabel("oracle observability   log-det $F$")
     ax[0].set_ylabel("inertia error [%]")
-    ax[0].set_title(f"Does observability still rank accuracy?  (rho={rho_o:+.2f})")
     ax[0].legend(fontsize=8)
 
     ax[1].loglog(std * 100, bias * 100, "o", color="purple")
@@ -104,10 +103,8 @@ def main():
         ax[1].annotate(n, (s * 100, b * 100), fontsize=6, alpha=0.6)
     ax[1].set_xlabel("random error (std) [%]")
     ax[1].set_ylabel("systematic error (bias) [%]")
-    ax[1].set_title("Errors-in-variables: bias breaks the CRLB story")
     ax[1].legend(fontsize=8)
 
-    fig.suptitle(f"Rung 1 — measurement noise (gyro sigma={SIGMA_W:.0e}, finite-diff omega_dot)")
     fig.tight_layout()
     out = ROOT / "docs" / "figs" / "rung1_measurement_noise.png"
     fig.savefig(out, dpi=130, bbox_inches="tight")

@@ -131,7 +131,6 @@ def main():
     ax[0].set_yscale("log")
     ax[0].set_xlabel("achieved observability   log-det $F$")
     ax[0].set_ylabel("inertia rel-err [%] (IV)")
-    ax[0].set_title(f"Link holds under constraints (rho={rho:+.2f})")
     fig.colorbar(sc, ax=ax[0], label="wheel-sat %")
 
     o0 = np.array([ld0[n] for n in names])
@@ -142,10 +141,8 @@ def main():
         ax[1].annotate(n, (a, b), fontsize=6, alpha=0.6)
     ax[1].set_xlabel("rung-0 observability (unconstrained spin-up)")
     ax[1].set_ylabel("rung-4 observability (momentum-limited)")
-    ax[1].set_title("Constraints invert the ranking")
     ax[1].legend(fontsize=8)
 
-    fig.suptitle(f"Rung 4 — reaction-wheel momentum budget (h_max={H_MAX} Nms)")
     fig.tight_layout()
     out = ROOT / "docs" / "figs" / "rung4_actuator_constraints.png"
     fig.savefig(out, dpi=130, bbox_inches="tight")

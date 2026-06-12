@@ -85,7 +85,6 @@ def main():
     ax.axvspan(0, t[BURN], color="gray", alpha=0.12, label="burn-in")
     ax.set_ylim(0, 9)
     ax.set_xlabel("time [s]"); ax.set_ylabel("Izz [kg m^2]")
-    ax.set_title(f"Rung 8 — recursive RLS tracking of time-varying inertia (lambda={LAM})")
     ax.legend(fontsize=9)
     fig.tight_layout()
     out = ROOT / "docs" / "figs" / "rung8_recursive_tracker.png"

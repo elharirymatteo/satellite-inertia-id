@@ -154,7 +154,6 @@ def main():
     ax.semilogy([ld_opt], [rel_opt * 100], "*", color="crimson", ms=20, label="FIM-optimized")
     ax.set_xlabel("augmented observability   log-det $F$")
     ax.set_ylabel("augmented-IV rel-err [%]")
-    ax.set_title(f"Rung 6 — optimal vs fixed excitation (hard regime, h_max={H_MAX})")
     ax.legend(fontsize=9)
     fig.tight_layout()
     out = ROOT / "docs" / "figs" / "rung6_adaptive_excitation.png"

@@ -112,17 +112,14 @@ def main():
         ax[0].annotate(n, (l, r * 100), fontsize=6, alpha=0.6)
     ax[0].set_xlabel("oracle observability   log-det $F$")
     ax[0].set_ylabel("inertia rel-err [%]")
-    ax[0].set_title("Does a consistent estimator restore the link?")
     ax[0].legend(fontsize=8)
 
     ax[1].semilogy(ld, bias_n * 100, "o", color="crimson", label="naive bias")
     ax[1].semilogy(ld, bias_i * 100, "s", color="navy", label="integral bias")
     ax[1].set_xlabel("oracle observability   log-det $F$")
     ax[1].set_ylabel("systematic error (bias) [%]")
-    ax[1].set_title("Integral form removes the errors-in-variables bias")
     ax[1].legend(fontsize=8)
 
-    fig.suptitle(f"Rung 2 — consistent estimator (gyro sigma={SIGMA_W:.0e})")
     fig.tight_layout()
     out = ROOT / "docs" / "figs" / "rung2_consistent_estimator.png"
     fig.savefig(out, dpi=130, bbox_inches="tight")

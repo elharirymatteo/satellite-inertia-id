@@ -103,17 +103,14 @@ def main():
         ax[0].semilogy(ld, col(key, 0) * 100, m, color=c, label=f"{key} (rho={rho:+.2f})")
     ax[0].set_xlabel("oracle observability   log-det $F$")
     ax[0].set_ylabel("inertia rel-err [%]")
-    ax[0].set_title("Does modeling the noise restore the link?")
     ax[0].legend(fontsize=8)
 
     for key, c, m in (("naive", "crimson", "o"), ("smoothed", "darkorange", "^"), ("iv", "navy", "s")):
         ax[1].semilogy(ld, col(key, 1) * 100, m, color=c, label=f"{key} bias")
     ax[1].set_xlabel("oracle observability   log-det $F$")
     ax[1].set_ylabel("systematic error (bias) [%]")
-    ax[1].set_title("IV cancels the errors-in-variables bias")
     ax[1].legend(fontsize=8)
 
-    fig.suptitle(f"Rung 3 — noise-modeling estimators (gyro sigma={SIGMA_W:.0e})")
     fig.tight_layout()
     out = ROOT / "docs" / "figs" / "rung3_noise_modeling_estimator.png"
     fig.savefig(out, dpi=130, bbox_inches="tight")

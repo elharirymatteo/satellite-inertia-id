@@ -46,9 +46,6 @@ ax.text(9.15, -0.05, "leaves the\nfilter's valid\nenvelope", fontsize=7, color="
 
 ax.set_xlabel("realism ladder rung")
 ax.set_ylabel(r"Spearman $\rho$(log-det $F$, inertia rel-err)")
-ax.set_title("Does observability predict spacecraft inertia-ID accuracy?\n"
-             "It is a theorem (rung 0), breaks under measurement noise (1–2), "
-             "and is restored only by a consistent estimator (3+)")
 ax.set_xticks(range(0, 10))
 ax.set_ylim(-1.05, 0.6)
 ax.set_xlim(-0.4, 10.4)

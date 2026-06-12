@@ -146,7 +146,6 @@ def main():
         ax.annotate(n, (l, r * 100), fontsize=6, alpha=0.6)
     ax.set_xlabel("augmented observability  log-det F")
     ax.set_ylabel("EKF inertia rel-err [%]")
-    ax.set_title(f"Rung 9 — real rl/ekf_jax.py validates the ladder (rho={rho:+.2f})")
     fig.tight_layout()
     out = ROOT / "docs" / "figs" / "rung9_real_ekf.png"
     fig.savefig(out, dpi=130, bbox_inches="tight")

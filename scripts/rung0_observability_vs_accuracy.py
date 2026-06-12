@@ -166,7 +166,6 @@ def main():
         ax[0].annotate(n, (p, e), fontsize=6, alpha=0.6)
     ax[0].set_xlabel("predicted MSE  $\\sigma^2\\,\\mathrm{tr}(F^{-1})$")
     ax[0].set_ylabel("empirical MSE (Monte-Carlo)")
-    ax[0].set_title(f"A-optimality is exact (rho={rho_a:+.2f})")
     ax[0].legend(fontsize=8)
 
     ax[1].semilogy(logdet, rel * 100, "o", color="navy")
@@ -174,9 +173,7 @@ def main():
         ax[1].annotate(n, (l, r * 100), fontsize=6, alpha=0.6)
     ax[1].set_xlabel("observability   log-det $F$")
     ax[1].set_ylabel("inertia rel-err [%]")
-    ax[1].set_title(f"D-optimality predicts accuracy (rho={rho_d:+.2f})")
 
-    fig.suptitle("Rung 0 — linear-Gaussian LS: observability vs estimation accuracy")
     fig.tight_layout()
     out = ROOT / "docs" / "figs" / "rung0_observability_vs_accuracy.png"
     out.parent.mkdir(parents=True, exist_ok=True)

@@ -150,17 +150,14 @@ def main():
         hat = windowed_iv(w_meas, y, centers)
         ax[0].plot(tc, hat[:, 2], "--", color=c, alpha=0.8, label=f"{n} est")
     ax[0].set_xlabel("time [s]"); ax[0].set_ylabel("Izz [kg m^2]")
-    ax[0].set_title("Tracking a ramping inertia")
     ax[0].legend(fontsize=8)
 
     for n, c in (("prbs_b", "navy"), ("chirp", "green"), ("sine_x", "crimson"), ("constant", "gray")):
         ax[1].semilogy(res[n][2], res[n][3] * 100, "o", color=c, alpha=0.6, label=n, ms=4)
     ax[1].set_xlabel("windowed observability  log-det F")
     ax[1].set_ylabel("windowed track rel-err [%]")
-    ax[1].set_title(f"Link holds for tracking (rho={rho:+.2f})")
     ax[1].legend(fontsize=8)
 
-    fig.suptitle("Rung 7 — time-varying inertia (windowed tracker)")
     fig.tight_layout()
     out = ROOT / "docs" / "figs" / "rung7_time_varying_inertia.png"
     fig.savefig(out, dpi=130, bbox_inches="tight")

@@ -158,8 +158,6 @@ def main():
     ax.set_xticks(x)
     ax.set_xticklabels(["fixed\nbroadband", "closed-loop\nin-envelope", "closed-loop\nNO envelope"], fontsize=9)
     ax.set_ylabel("EKF inertia rel-err [%]")
-    ax.set_title("Rung 10 — under a tight momentum budget, closed-loop in-envelope excitation wins\n"
-                 "(fixed broadband saturates 46%; no-envelope greedy spins up and fails)")
     fig.tight_layout()
     out = ROOT / "docs" / "figs" / "rung10_closed_loop.png"
     fig.savefig(out, dpi=140, bbox_inches="tight")

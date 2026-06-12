@@ -123,7 +123,6 @@ def main():
     ax[0].set_xticks(x)
     ax[0].set_xticklabels([names[i] for i in order], rotation=90, fontsize=6)
     ax[0].set_ylabel("inertia rel-err [%]")
-    ax[0].set_title("Augmenting the estimator absorbs the disturbance")
     ax[0].legend(fontsize=8)
 
     ax[1].semilogy(ld9, ra * 100, "s", color="navy")
@@ -131,9 +130,7 @@ def main():
         ax[1].annotate(n, (l, r * 100), fontsize=6, alpha=0.6)
     ax[1].set_xlabel("augmented (9-param) observability   log-det $F$")
     ax[1].set_ylabel("augmented-IV rel-err [%]")
-    ax[1].set_title(f"Joint observability predicts accuracy (rho={rho:+.2f})")
 
-    fig.suptitle("Rung 5 — unmodeled disturbance + augmented estimator")
     fig.tight_layout()
     out = ROOT / "docs" / "figs" / "rung5_disturbance.png"
     fig.savefig(out, dpi=130, bbox_inches="tight")
